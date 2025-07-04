@@ -1,0 +1,50 @@
+name: Lua Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lua-version: ['5.1', '5.2', '5.3', '5.4', 'luajit-2.0', 'luajit-2.1']
+
+    name: Lua ${{ matrix.lua-version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Lua
+        uses: leafo/gh-actions-lua@v11
+        with:
+          luaVersion: ${{ matrix.lua-version }}
+
+      - name: Run tests
+        run: |
+          # Set the correct binary name based on the Lua version
+          if [[ "${{ matrix.lua-version }}" == luajit* ]]; then
+            export LUA_BINARY=luajit
+          else
+            export LUA_BINARY=lua
+          fi
+
+          # Add repository root to Lua's package path
+          # This allows require() to find modules in the repository root
+          export LUA_PATH="./?.lua;./?/init.lua;$LUA_PATH"
+
+          # Set the repository root path as an environment variable
+          # This can be used to construct absolute paths to test files
+          export REPO_ROOT="$GITHUB_WORKSPACE"
+
+          # Make the script executable
+          chmod +x ./run_tests.sh
+          
+          # Include slow tests in CI runs
+          export INCLUDE_SLOW_TESTS=1
+
+          # Run the tests
+          ./run_tests.sh all

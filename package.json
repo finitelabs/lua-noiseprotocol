@@ -1,0 +1,13 @@
+{
+  "scripts": {
+    "fmt:lua": "stylua --indent-type Spaces --column-width 120 --line-endings Unix --indent-width 2 --quote-style AutoPreferDouble -g '*.lua' -v .",
+    "fmt:md": "prettier --prose-wrap always --write *.md",
+    "fmt": "npm run fmt:lua && npm run fmt:md",
+    "test": "./run_tests.sh",
+    "test:matrix": "./run_tests_matrix.sh"
+  },
+  "dependencies": {
+    "@johnnymorganz/stylua-bin": "^2.1.0",
+    "prettier": "^3.5.3"
+  }
+}
