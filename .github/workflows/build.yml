@@ -1,0 +1,116 @@
+name: Lua Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  format-check:
+    runs-on: ubuntu-latest
+    name: Format Check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Check formatting
+        run: npm run fmt-check
+
+  test:
+    needs: format-check
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lua-version: ['5.1', '5.2', '5.3', '5.4', 'luajit-2.0', 'luajit-2.1']
+
+    name: Lua ${{ matrix.lua-version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Lua
+        uses: leafo/gh-actions-lua@v11
+        with:
+          luaVersion: ${{ matrix.lua-version }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: |
+          # Set the correct binary name based on the Lua version
+          if [[ "${{ matrix.lua-version }}" == luajit* ]]; then
+            export LUA_BINARY=luajit
+          else
+            export LUA_BINARY=lua
+          fi
+
+          ${LUA_BINARY} -v
+
+          # Include slow tests in CI runs
+          export INCLUDE_SLOW_TESTS=1
+          
+          # Run test vectors in parallel
+          export NOISE_VECTOR_WORKERS=4
+
+          # Run the tests
+          npm run test -- all
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    name: Build Combined Modules
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build combined modules
+        run: npm run build
+
+      - name: Verify builds
+        run: |
+          # Check that all expected files were created
+          for version in 5.1 5.2 5.3 jit; do
+            file="build/noiseprotocol-lua${version}.lua"
+            if [ -f "$file" ]; then
+              echo "✅ $file exists ($(wc -c < "$file") bytes)"
+            else
+              echo "❌ $file missing"
+              exit 1
+            fi
+          done
+          
+          # Check default build
+          if [ -f "build/noiseprotocol.lua" ]; then
+            echo "✅ build/noiseprotocol.lua exists ($(wc -c < "build/noiseprotocol.lua") bytes)"
+          else
+            echo "❌ build/noiseprotocol.lua missing"
+            exit 1
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: noiseprotocol-builds
+          path: build/*.lua
+          retention-days: 30

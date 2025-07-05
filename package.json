@@ -2,12 +2,19 @@
   "scripts": {
     "fmt:lua": "stylua --indent-type Spaces --column-width 120 --line-endings Unix --indent-width 2 --quote-style AutoPreferDouble -g '*.lua' -v .",
     "fmt:md": "prettier --prose-wrap always --write *.md",
-    "fmt": "npm run fmt:lua && npm run fmt:md",
-    "test": "./run_tests.sh",
-    "test:matrix": "./run_tests_matrix.sh"
+    "fmt:js": "prettier --write *.js",
+    "fmt": "npm run fmt:lua && npm run fmt:md && npm run fmt:js",
+    "fmt-check:lua": "stylua --check --indent-type Spaces --column-width 120 --line-endings Unix --indent-width 2 --quote-style AutoPreferDouble -g '*.lua' .",
+    "fmt-check:md": "prettier --check --prose-wrap always *.md",
+    "fmt-check:js": "prettier --check *.js",
+    "fmt-check": "npm run fmt-check:lua && npm run fmt-check:md && npm run fmt-check:js",
+    "test": "bash run_tests.sh",
+    "test:matrix": "bash run_tests_matrix.sh",
+    "build": "node ./build.js"
   },
   "dependencies": {
     "@johnnymorganz/stylua-bin": "^2.1.0",
+    "luabundle": "^1.7.0",
     "prettier": "^3.5.3"
   }
 }

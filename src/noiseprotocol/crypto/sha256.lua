@@ -1,5 +1,9 @@
---- @module "crypto.sha256"
+--- @module "noiseprotocol.crypto.sha256"
 --- Pure Lua SHA-256 Implementation for portability.
+
+local utils = require("noiseprotocol.utils")
+local bit32 = utils.bit32
+local bytes = utils.bytes
 
 local sha256 = {}
 
@@ -87,15 +91,6 @@ local H0 = {
   0x5be0cd19,
 }
 
--- Load utils library for consistent operations
-local utils = require("utils")
-local band32 = utils.band32
-local bxor32 = utils.bxor32
-local bnot32 = utils.bnot32
-local rshift32 = utils.rshift32
-local ror32 = utils.ror32
-local add32 = utils.add32
-
 --- SHA-256 core compression function
 --- @param chunk string 64-byte chunk
 --- @param H HashState Hash state (8 integers)
@@ -105,14 +100,14 @@ local function sha256_chunk(chunk, H)
 
   -- First 16 words are the message chunk
   for i = 1, 16 do
-    W[i] = utils.be_bytes_to_u32(chunk, (i - 1) * 4 + 1)
+    W[i] = bytes.be_bytes_to_u32(chunk, (i - 1) * 4 + 1)
   end
 
   -- Extend the first 16 words into the remaining 48 words
   for i = 17, 64 do
-    local s0 = bxor32(ror32(W[i - 15], 7), bxor32(ror32(W[i - 15], 18), rshift32(W[i - 15], 3)))
-    local s1 = bxor32(ror32(W[i - 2], 17), bxor32(ror32(W[i - 2], 19), rshift32(W[i - 2], 10)))
-    W[i] = add32(add32(add32(W[i - 16], s0), W[i - 7]), s1)
+    local s0 = bit32.bxor(bit32.ror(W[i - 15], 7), bit32.bxor(bit32.ror(W[i - 15], 18), bit32.rshift(W[i - 15], 3)))
+    local s1 = bit32.bxor(bit32.ror(W[i - 2], 17), bit32.bxor(bit32.ror(W[i - 2], 19), bit32.rshift(W[i - 2], 10)))
+    W[i] = bit32.add(bit32.add(bit32.add(W[i - 16], s0), W[i - 7]), s1)
   end
 
   -- Initialize working variables
@@ -121,32 +116,32 @@ local function sha256_chunk(chunk, H)
   -- Main loop
   for i = 1, 64 do
     local prime = assert(K[i], "Missing SHA-256 constant K[" .. i .. "]")
-    local S1 = bxor32(ror32(e, 6), bxor32(ror32(e, 11), ror32(e, 25)))
-    local ch = bxor32(band32(e, f), band32(bnot32(e), g))
-    local temp1 = add32(add32(add32(add32(h, S1), ch), prime), W[i])
-    local S0 = bxor32(ror32(a, 2), bxor32(ror32(a, 13), ror32(a, 22)))
-    local maj = bxor32(band32(a, b), bxor32(band32(a, c), band32(b, c)))
-    local temp2 = add32(S0, maj)
+    local S1 = bit32.bxor(bit32.ror(e, 6), bit32.bxor(bit32.ror(e, 11), bit32.ror(e, 25)))
+    local ch = bit32.bxor(bit32.band(e, f), bit32.band(bit32.bnot(e), g))
+    local temp1 = bit32.add(bit32.add(bit32.add(bit32.add(h, S1), ch), prime), W[i])
+    local S0 = bit32.bxor(bit32.ror(a, 2), bit32.bxor(bit32.ror(a, 13), bit32.ror(a, 22)))
+    local maj = bit32.bxor(bit32.band(a, b), bit32.bxor(bit32.band(a, c), bit32.band(b, c)))
+    local temp2 = bit32.add(S0, maj)
 
     h = g
     g = f
     f = e
-    e = add32(d, temp1)
+    e = bit32.add(d, temp1)
     d = c
     c = b
     b = a
-    a = add32(temp1, temp2)
+    a = bit32.add(temp1, temp2)
   end
 
   -- Add compressed chunk to current hash value
-  H[1] = add32(H[1], a)
-  H[2] = add32(H[2], b)
-  H[3] = add32(H[3], c)
-  H[4] = add32(H[4], d)
-  H[5] = add32(H[5], e)
-  H[6] = add32(H[6], f)
-  H[7] = add32(H[7], g)
-  H[8] = add32(H[8], h)
+  H[1] = bit32.add(H[1], a)
+  H[2] = bit32.add(H[2], b)
+  H[3] = bit32.add(H[3], c)
+  H[4] = bit32.add(H[4], d)
+  H[5] = bit32.add(H[5], e)
+  H[6] = bit32.add(H[6], f)
+  H[7] = bit32.add(H[7], g)
+  H[8] = bit32.add(H[8], h)
 end
 
 -- ============================================================================
@@ -177,7 +172,7 @@ function sha256.sha256(data)
 
   -- Append original length as 64-bit big-endian integer
   -- For simplicity, we only support messages < 2^32 bits
-  data = data .. string.rep("\0", 4) .. utils.u32_to_be_bytes(msg_len_bits)
+  data = data .. string.rep("\0", 4) .. bytes.u32_to_be_bytes(msg_len_bits)
 
   -- Process message in 64-byte chunks
   for i = 1, #data, 64 do
@@ -190,7 +185,7 @@ function sha256.sha256(data)
   -- Produce final hash value as binary string
   local result = ""
   for i = 1, 8 do
-    result = result .. utils.u32_to_be_bytes(H[i])
+    result = result .. bytes.u32_to_be_bytes(H[i])
   end
 
   return result
@@ -201,7 +196,7 @@ end
 --- @return string hex 64-character hex string
 function sha256.sha256_hex(data)
   local hash = sha256.sha256(data)
-  return utils.to_hex(hash)
+  return bytes.to_hex(hash)
 end
 
 --- Compute HMAC-SHA256
@@ -226,8 +221,8 @@ function sha256.hmac_sha256(key, data)
   local opad = ""
   for i = 1, block_size do
     local byte = string.byte(key, i)
-    ipad = ipad .. string.char(bxor32(byte, 0x36))
-    opad = opad .. string.char(bxor32(byte, 0x5C))
+    ipad = ipad .. string.char(bit32.bxor(byte, 0x36))
+    opad = opad .. string.char(bit32.bxor(byte, 0x5C))
   end
 
   -- Compute HMAC = H(opad || H(ipad || data))
@@ -241,7 +236,7 @@ end
 --- @return string hex 64-character hex string
 function sha256.hmac_sha256_hex(key, data)
   local hmac = sha256.hmac_sha256(key, data)
-  return utils.to_hex(hmac)
+  return bytes.to_hex(hmac)
 end
 
 -- ============================================================================
@@ -391,7 +386,7 @@ function sha256.selftest()
   local test_msg = "test message"
   local binary_hash = sha256.sha256(test_msg)
   local hex_hash = sha256.sha256_hex(test_msg)
-  if hex_hash ~= utils.to_hex(binary_hash) then
+  if hex_hash ~= bytes.to_hex(binary_hash) then
     print("  ❌ FAIL: Binary and hex outputs inconsistent")
   else
     print("  ✅ PASS: Binary and hex outputs consistent")

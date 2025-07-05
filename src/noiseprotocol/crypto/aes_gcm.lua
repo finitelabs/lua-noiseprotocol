@@ -1,9 +1,11 @@
---- @module "crypto.aes_gcm"
+--- @module "noiseprotocol.crypto.aes_gcm"
 --- AES-GCM Authenticated Encryption with Associated Data (AEAD) Implementation for portability.
 
-local aes_gcm = {}
+local utils = require("noiseprotocol.utils")
+local bit32 = utils.bit32
+local bytes = utils.bytes
 
-local utils = require("utils")
+local aes_gcm = {}
 
 -- ============================================================================
 -- AES CORE IMPLEMENTATION
@@ -549,10 +551,10 @@ local RCON = {
 --- @return table result 4-byte array
 local function xor_words(a, b)
   return {
-    utils.bxor32(a[1], b[1]),
-    utils.bxor32(a[2], b[2]),
-    utils.bxor32(a[3], b[3]),
-    utils.bxor32(a[4], b[4]),
+    bit32.bxor(a[1], b[1]),
+    bit32.bxor(a[2], b[2]),
+    bit32.bxor(a[3], b[3]),
+    bit32.bxor(a[4], b[4]),
   }
 end
 
@@ -629,15 +631,15 @@ end
 local function gf_mul(a, b)
   local p = 0
   for _ = 0, 7 do
-    if utils.band32(b, 1) ~= 0 then
-      p = utils.bxor32(p, a)
+    if bit32.band(b, 1) ~= 0 then
+      p = bit32.bxor(p, a)
     end
-    local hi_bit_set = utils.band32(a, 0x80) ~= 0
-    a = utils.band32(utils.lshift32(a, 1), 0xFF)
+    local hi_bit_set = bit32.band(a, 0x80) ~= 0
+    a = bit32.band(bit32.lshift(a, 1), 0xFF)
     if hi_bit_set then
-      a = utils.bxor32(a, 0x1B) -- x^8 + x^4 + x^3 + x + 1
+      a = bit32.bxor(a, 0x1B) -- x^8 + x^4 + x^3 + x + 1
     end
-    b = utils.rshift32(b, 1)
+    b = bit32.rshift(b, 1)
   end
   return p
 end
@@ -650,15 +652,14 @@ local function mix_columns(state)
     local b = {}
     for i = 0, 3 do
       a[i] = state[i][c]
-      b[i] = utils.band32(state[i][c], 0x80) ~= 0
-          and utils.bxor32(utils.band32(utils.lshift32(state[i][c], 1), 0xFF), 0x1B)
-        or utils.band32(utils.lshift32(state[i][c], 1), 0xFF)
+      b[i] = bit32.band(state[i][c], 0x80) ~= 0 and bit32.bxor(bit32.band(bit32.lshift(state[i][c], 1), 0xFF), 0x1B)
+        or bit32.band(bit32.lshift(state[i][c], 1), 0xFF)
     end
 
-    state[0][c] = utils.bxor32(utils.bxor32(utils.bxor32(b[0], a[1]), utils.bxor32(b[1], a[2])), a[3])
-    state[1][c] = utils.bxor32(utils.bxor32(utils.bxor32(a[0], b[1]), utils.bxor32(a[2], b[2])), a[3])
-    state[2][c] = utils.bxor32(utils.bxor32(utils.bxor32(a[0], a[1]), utils.bxor32(b[2], a[3])), b[3])
-    state[3][c] = utils.bxor32(utils.bxor32(utils.bxor32(a[0], b[0]), utils.bxor32(a[1], a[2])), b[3])
+    state[0][c] = bit32.bxor(bit32.bxor(bit32.bxor(b[0], a[1]), bit32.bxor(b[1], a[2])), a[3])
+    state[1][c] = bit32.bxor(bit32.bxor(bit32.bxor(a[0], b[1]), bit32.bxor(a[2], b[2])), a[3])
+    state[2][c] = bit32.bxor(bit32.bxor(bit32.bxor(a[0], a[1]), bit32.bxor(b[2], a[3])), b[3])
+    state[3][c] = bit32.bxor(bit32.bxor(bit32.bxor(a[0], b[0]), bit32.bxor(a[1], a[2])), b[3])
   end
 end
 
@@ -707,7 +708,7 @@ local function add_round_key(state, round_key, round)
   for c = 0, 3 do
     local key_word = round_key[round * 4 + c]
     for r = 0, 3 do
-      state[r][c] = utils.bxor32(state[r][c], key_word[r + 1])
+      state[r][c] = bit32.bxor(state[r][c], key_word[r + 1])
     end
   end
 end
@@ -774,27 +775,27 @@ local function gcm_multiply(x, y)
   for i = 1, 16 do
     local byte = string.byte(x, i)
     for bit = 7, 0, -1 do
-      if utils.band32(byte, utils.lshift32(1, bit)) ~= 0 then
+      if bit32.band(byte, bit32.lshift(1, bit)) ~= 0 then
         -- z = z XOR v
         for j = 1, 16 do
-          z[j] = utils.bxor32(z[j], v[j])
+          z[j] = bit32.bxor(z[j], v[j])
         end
       end
 
       -- Check if LSB of v is 1 (bit 0 of last byte)
-      local lsb = utils.band32(v[16], 1)
+      local lsb = bit32.band(v[16], 1)
 
       -- v = v >> 1 (right shift entire 128-bit value by 1)
       local carry = 0
       for j = 1, 16 do
-        local new_carry = utils.band32(v[j], 1)
-        v[j] = utils.bor32(utils.rshift32(v[j], 1), utils.lshift32(carry, 7))
+        local new_carry = bit32.band(v[j], 1)
+        v[j] = bit32.bor(bit32.rshift(v[j], 1), bit32.lshift(carry, 7))
         carry = new_carry
       end
 
       -- If LSB was 1, XOR with R = 0xE1000000000000000000000000000000
       if lsb ~= 0 then
-        v[1] = utils.bxor32(v[1], 0xE1)
+        v[1] = bit32.bxor(v[1], 0xE1)
       end
     end
   end
@@ -821,7 +822,7 @@ local function ghash(h, data)
     -- y = (y XOR block) * h
     local y_xor = ""
     for j = 1, 16 do
-      y_xor = y_xor .. string.char(utils.bxor32(string.byte(y, j), string.byte(block, j)))
+      y_xor = y_xor .. string.char(bit32.bxor(string.byte(y, j), string.byte(block, j)))
     end
 
     y = gcm_multiply(y_xor, h)
@@ -846,7 +847,7 @@ local function inc_counter(counter)
 
   -- Convert back to bytes (big-endian)
   for i = 3, 0, -1 do
-    result = result .. string.char(utils.band32(utils.rshift32(val, i * 8), 0xFF))
+    result = result .. string.char(bit32.band(bit32.rshift(val, i * 8), 0xFF))
   end
 
   return result
@@ -900,11 +901,11 @@ local function format_gcm_data(aad, ciphertext)
 
   -- AAD length (64 bits big-endian)
   result = result .. string.rep("\0", 4) -- High 32 bits
-  result = result .. utils.u32_to_be_bytes(aad_bits_low) -- Low 32 bits
+  result = result .. bytes.u32_to_be_bytes(aad_bits_low) -- Low 32 bits
 
   -- Ciphertext length (64 bits big-endian)
   result = result .. string.rep("\0", 4) -- High 32 bits
-  result = result .. utils.u32_to_be_bytes(ct_bits_low) -- Low 32 bits
+  result = result .. bytes.u32_to_be_bytes(ct_bits_low) -- Low 32 bits
 
   return result
 end
@@ -938,7 +939,7 @@ function aes_gcm.encrypt(key, nonce, plaintext, aad)
   local keystream = generate_keystream(key, nonce, #plaintext)
   local ciphertext = ""
   for i = 1, #plaintext do
-    ciphertext = ciphertext .. string.char(utils.bxor32(string.byte(plaintext, i), string.byte(keystream, i)))
+    ciphertext = ciphertext .. string.char(bit32.bxor(string.byte(plaintext, i), string.byte(keystream, i)))
   end
 
   -- Calculate authentication tag
@@ -949,7 +950,7 @@ function aes_gcm.encrypt(key, nonce, plaintext, aad)
   local encrypted_j0 = aes_encrypt_block(j0, expanded_key, nr)
   local tag = ""
   for i = 1, 16 do
-    tag = tag .. string.char(utils.bxor32(string.byte(s, i), string.byte(encrypted_j0, i)))
+    tag = tag .. string.char(bit32.bxor(string.byte(s, i), string.byte(encrypted_j0, i)))
   end
 
   return ciphertext .. tag
@@ -994,7 +995,7 @@ function aes_gcm.decrypt(key, nonce, ciphertext_and_tag, aad)
   local encrypted_j0 = aes_encrypt_block(j0, expanded_key, nr)
   local expected_tag = ""
   for i = 1, 16 do
-    expected_tag = expected_tag .. string.char(utils.bxor32(string.byte(s, i), string.byte(encrypted_j0, i)))
+    expected_tag = expected_tag .. string.char(bit32.bxor(string.byte(s, i), string.byte(encrypted_j0, i)))
   end
 
   -- Verify tag (constant-time comparison)
@@ -1006,7 +1007,7 @@ function aes_gcm.decrypt(key, nonce, ciphertext_and_tag, aad)
   local keystream = generate_keystream(key, nonce, #ciphertext)
   local plaintext = ""
   for i = 1, #ciphertext do
-    plaintext = plaintext .. string.char(utils.bxor32(string.byte(ciphertext, i), string.byte(keystream, i)))
+    plaintext = plaintext .. string.char(bit32.bxor(string.byte(ciphertext, i), string.byte(keystream, i)))
   end
 
   return plaintext
@@ -1021,7 +1022,7 @@ local test_vectors = {
     plaintext = "",
     aad = "",
     ciphertext = "",
-    tag = utils.from_hex("58e2fccefa7e3061367f1d57a4e7455a"),
+    tag = bytes.from_hex("58e2fccefa7e3061367f1d57a4e7455a"),
   },
   {
     name = "NIST Test Case 2 (AES-128-GCM)",
@@ -1029,22 +1030,26 @@ local test_vectors = {
     nonce = string.rep("\0", 12),
     plaintext = string.rep("\0", 16),
     aad = "",
-    ciphertext = utils.from_hex("0388dace60b6a392f328c2b971b2fe78"),
-    tag = utils.from_hex("ab6e47d42cec13bdf53a67b21257bddf"),
+    ciphertext = bytes.from_hex("0388dace60b6a392f328c2b971b2fe78"),
+    tag = bytes.from_hex("ab6e47d42cec13bdf53a67b21257bddf"),
   },
   {
     name = "NIST Test Case 3 (AES-128-GCM with AAD)",
-    key = utils.from_hex("feffe9928665731c6d6a8f9467308308"),
-    nonce = utils.from_hex("cafebabefacedbaddecaf888"),
-    plaintext = utils.from_hex("d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255"),
+    key = bytes.from_hex("feffe9928665731c6d6a8f9467308308"),
+    nonce = bytes.from_hex("cafebabefacedbaddecaf888"),
+    plaintext = bytes.from_hex(
+      "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b391aafd255"
+    ),
     aad = "",
-    ciphertext = utils.from_hex("42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091473f5985"),
-    tag = utils.from_hex("4d5c2af327cd64a62cf35abd2ba6fab4"),
+    ciphertext = bytes.from_hex(
+      "42831ec2217774244b7221b784d0d49ce3aa212f2c02a4e035c17e2329aca12e21d514b25466931c7d8f6a5aac84aa051ba30b396a0aac973d58e091473f5985"
+    ),
+    tag = bytes.from_hex("4d5c2af327cd64a62cf35abd2ba6fab4"),
   },
   {
     name = "Roundtrip test with various inputs",
-    key = utils.from_hex("000102030405060708090a0b0c0d0e0f"),
-    nonce = utils.from_hex("000000000000004a00000000"),
+    key = bytes.from_hex("000102030405060708090a0b0c0d0e0f"),
+    nonce = bytes.from_hex("000000000000004a00000000"),
     aad = "Additional authenticated data",
     plaintext = "Hello, AES-GCM AEAD!",
   },
@@ -1077,15 +1082,15 @@ function aes_gcm.selftest()
             passed = passed + 1
           else
             print("  ❌ FAIL: Decryption")
-            print("    Expected: " .. utils.to_hex(test.plaintext))
-            print("    Got:      " .. (decrypted and utils.to_hex(decrypted) or "nil"))
+            print("    Expected: " .. bytes.to_hex(test.plaintext))
+            print("    Got:      " .. (decrypted and bytes.to_hex(decrypted) or "nil"))
           end
         else
           print("  ❌ FAIL: Encryption")
-          print("    Expected CT: " .. utils.to_hex(test.ciphertext))
-          print("    Got CT:      " .. utils.to_hex(result_ct))
-          print("    Expected Tag: " .. utils.to_hex(test.tag))
-          print("    Got Tag:      " .. utils.to_hex(result_tag))
+          print("    Expected CT: " .. bytes.to_hex(test.ciphertext))
+          print("    Got CT:      " .. bytes.to_hex(result_ct))
+          print("    Expected Tag: " .. bytes.to_hex(test.tag))
+          print("    Got Tag:      " .. bytes.to_hex(result_tag))
         end
       else
         -- Roundtrip test
@@ -1097,8 +1102,8 @@ function aes_gcm.selftest()
           passed = passed + 1
         else
           print("  ❌ FAIL: Roundtrip test")
-          print("    Original:  " .. utils.to_hex(test.plaintext))
-          print("    Decrypted: " .. (decrypted and utils.to_hex(decrypted) or "nil"))
+          print("    Original:  " .. bytes.to_hex(test.plaintext))
+          print("    Decrypted: " .. (decrypted and bytes.to_hex(decrypted) or "nil"))
         end
       end
     end

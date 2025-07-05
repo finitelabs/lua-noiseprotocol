@@ -1,6 +1,7 @@
-local noise = require("noise")
-local utils = require("utils")
+local noise = require("noiseprotocol")
+local utils = require("noiseprotocol.utils")
 local json = require("vendor.json")
+local bytes = utils.bytes
 
 -- Parse test vectors from file
 local function parse_vectors(filename)
@@ -18,13 +19,21 @@ local function psks_from_hex(hex_psks)
   local psks = {}
   if hex_psks then
     for i, hex in ipairs(hex_psks) do
-      psks[i] = utils.from_hex(hex)
+      psks[i] = bytes.from_hex(hex)
     end
   end
   return psks
 end
 
--- Run a single test vector
+local function should_skip_vector(vector)
+  -- FIXME: Skip test vectors that use 448 DH function (not supported)
+  return vector.protocol_name:find("_448_") ~= nil
+end
+
+--- Run a single test vector
+--- @param vector table Test vector data
+--- @return boolean success True if test passed
+--- @return string[] errors List of error messages if test failed
 local function run_test_vector(vector)
   -- Create initiator config
   --- @type NoiseConfig
@@ -32,10 +41,10 @@ local function run_test_vector(vector)
     protocol_name = vector.protocol_name,
     initiator = true,
     psks = psks_from_hex(vector.init_psks),
-    prologue = vector.init_prologue and utils.from_hex(vector.init_prologue),
-    ephemeral_key = vector.init_ephemeral and utils.from_hex(vector.init_ephemeral),
-    static_key = vector.init_static and utils.from_hex(vector.init_static),
-    remote_static_key = vector.init_remote_static and utils.from_hex(vector.init_remote_static),
+    prologue = vector.init_prologue and bytes.from_hex(vector.init_prologue),
+    ephemeral_key = vector.init_ephemeral and bytes.from_hex(vector.init_ephemeral),
+    static_key = vector.init_static and bytes.from_hex(vector.init_static),
+    remote_static_key = vector.init_remote_static and bytes.from_hex(vector.init_remote_static),
   }
 
   -- Create responder config
@@ -44,10 +53,10 @@ local function run_test_vector(vector)
     protocol_name = vector.protocol_name,
     initiator = false,
     psks = psks_from_hex(vector.resp_psks),
-    prologue = vector.resp_prologue and utils.from_hex(vector.resp_prologue),
-    ephemeral_key = vector.resp_ephemeral and utils.from_hex(vector.resp_ephemeral),
-    static_key = vector.resp_static and utils.from_hex(vector.resp_static),
-    remote_static_key = vector.resp_remote_static and utils.from_hex(vector.resp_remote_static),
+    prologue = vector.resp_prologue and bytes.from_hex(vector.resp_prologue),
+    ephemeral_key = vector.resp_ephemeral and bytes.from_hex(vector.resp_ephemeral),
+    static_key = vector.resp_static and bytes.from_hex(vector.resp_static),
+    remote_static_key = vector.resp_remote_static and bytes.from_hex(vector.resp_remote_static),
   }
 
   local initiator = noise.NoiseConnection:new(init_config)
@@ -75,7 +84,7 @@ local function run_test_vector(vector)
     local receiver = (is_one_way or is_initiator_turn) and responder or initiator
 
     -- Send message
-    local payload = utils.from_hex(msg_data.payload)
+    local payload = bytes.from_hex(msg_data.payload)
     local ciphertext
 
     -- Check if this is a handshake or transport message
@@ -86,7 +95,7 @@ local function run_test_vector(vector)
     end
 
     -- Compare with expected ciphertext
-    local expected_ct = utils.from_hex(msg_data.ciphertext)
+    local expected_ct = bytes.from_hex(msg_data.ciphertext)
     if ciphertext ~= expected_ct then
       table.insert(
         errors,
@@ -94,7 +103,7 @@ local function run_test_vector(vector)
           "Message %d: Ciphertext mismatch\n  Expected: %s\n  Got:      %s",
           msg_idx - 1,
           msg_data.ciphertext,
-          utils.to_hex(ciphertext)
+          bytes.to_hex(ciphertext)
         )
       )
     end
@@ -113,8 +122,8 @@ local function run_test_vector(vector)
         string.format(
           "Message %d: Payload mismatch after decryption\n  Expected: %s\n  Got:      %s",
           msg_idx - 1,
-          utils.to_hex(payload),
-          utils.to_hex(received_payload or "")
+          bytes.to_hex(payload),
+          bytes.to_hex(received_payload or "")
         )
       )
     end
@@ -128,58 +137,98 @@ local function run_test_vector(vector)
   return #errors == 0, errors
 end
 
--- Run all test vectors
-local function run_all_tests(filename)
-  print("Parsing test vectors from " .. filename .. "...")
+-- Run test vectors with optional parallel distribution
+local function run_all_tests(filename, worker_id, num_workers)
   local vectors = parse_vectors(filename)
-  print("Found " .. #vectors .. " test vectors")
+
+  -- For parallel execution, only print from worker 0
+  if not worker_id or worker_id == 0 then
+    print("Parsing test vectors from " .. filename .. "...")
+    print("Found " .. #vectors .. " test vectors")
+  end
 
   local passed = 0
   local failed = 0
+  local errors_list = {}
 
   -- Group results by pattern/cipher/hash
   local results = {}
 
-  for _, vector in ipairs(vectors) do
-    -- FIXME: Skip test vectors that use 448 DH function (not supported)
-    if not vector.protocol_name:find("_448_") then
-      -- Initialize results tracking for this configuration
-      local key = vector.protocol_name:gsub("^Noise_[^_]+_", "")
-      if not results[key] then
-        results[key] = { passed = 0, failed = 0 }
-      end
+  for idx, vector in ipairs(vectors) do
+    -- Skip if this vector is not assigned to this worker
+    if not worker_id or ((idx - 1) % num_workers == worker_id) then
+      if not should_skip_vector(vector) then
+        -- Initialize results tracking for this configuration
+        local key = vector.protocol_name:gsub("^Noise_[^_]+_", "")
+        if not results[key] then
+          results[key] = { passed = 0, failed = 0 }
+        end
 
-      local success, result1, result2 = pcall(run_test_vector, vector)
+        local success, test_passed, test_errors = pcall(run_test_vector, vector)
 
-      if success then
-        local test_passed = result1
-        local errors = result2
-        if test_passed then
-          passed = passed + 1
-          results[key].passed = results[key].passed + 1
-          print("✅ PASSED: " .. vector.protocol_name)
+        if success then
+          if test_passed then
+            passed = passed + 1
+            results[key].passed = results[key].passed + 1
+            if not worker_id then -- Only print in sequential mode
+              print("✅ PASSED: " .. vector.protocol_name)
+            end
+          else
+            failed = failed + 1
+            results[key].failed = results[key].failed + 1
+            table.insert(errors_list, {
+              protocol = vector.protocol_name,
+              errors = test_errors,
+            })
+            if not worker_id then -- Only print in sequential mode
+              print("\n❌ FAILED: " .. vector.protocol_name)
+              for _, err in ipairs(test_errors) do
+                print("  " .. err)
+              end
+            end
+          end
         else
-          -- Show test failures
+          -- Error in test execution
           failed = failed + 1
           results[key].failed = results[key].failed + 1
-          print("\n❌ FAILED: " .. vector.protocol_name)
-          for _, err in ipairs(errors) do
-            print("  " .. err)
+          table.insert(errors_list, {
+            protocol = vector.protocol_name,
+            errors = { tostring(test_passed) }, -- test_passed contains the error message
+          })
+          if not worker_id then -- Only print in sequential mode
+            print("\n❌ ERROR: " .. vector.protocol_name)
+            print("  " .. tostring(test_passed))
           end
         end
       else
-        failed = failed + 1
-        results[key].failed = results[key].failed + 1
-        print("\n❌ ERROR: " .. vector.protocol_name)
-        print("  " .. tostring(result1))
+        -- Skip this vector
+        if not worker_id then -- Only print in sequential mode
+          print("⏭ SKIPPED: " .. vector.protocol_name)
+        end
       end
     end
   end
 
+  -- For parallel execution, output in parseable format
+  if worker_id then
+    print(string.format("RESULTS:%d:%d", passed, failed))
+
+    -- Output errors if any
+    for _, error_info in ipairs(errors_list) do
+      print(string.format("ERROR:❌ %s", error_info.protocol))
+      for _, err in ipairs(error_info.errors) do
+        print(string.format("ERROR:  %s", err))
+      end
+    end
+
+    return failed == 0
+  end
+
+  -- For sequential execution, print summary
   print("\n\nTest Results:")
   print(string.format("  ✅ Passed:  %d", passed))
   print(string.format("  ❌ Failed:  %d", failed))
-  print(string.format("  Total:     %d", #vectors))
+  print(string.format("  ⏭  Skipped: %d", #vectors - passed - failed))
 
   -- Print summary by configuration
   print("\nResults by configuration:")
@@ -199,11 +248,64 @@ local function run_all_tests(filename)
     end
   end
 
-  return passed
+  return failed == 0
 end
 
--- Main
-return function(filename)
-  assert(filename, "Test vectors file not specified")
-  return run_all_tests(filename)
+-- Get the number of vectors in a file
+local function count_vectors(filename)
+  local vectors = parse_vectors(filename)
+  return #vectors
+end
+
+-- Get summary info about vectors in a file
+local function get_vector_info(filename)
+  local vectors = parse_vectors(filename)
+  local total = #vectors
+  local skipped = 0
+
+  for _, vector in ipairs(vectors) do
+    if should_skip_vector(vector) then
+      skipped = skipped + 1
+    end
+  end
+
+  return {
+    total = total,
+    testable = total - skipped,
+    skipped = skipped,
+  }
+end
+
+-- Module exports
+local M = {
+  parse_vectors = parse_vectors,
+  run_test_vector = run_test_vector,
+  run_all_tests = run_all_tests,
+  count_vectors = count_vectors,
+  get_vector_info = get_vector_info,
+}
+
+-- Main entry point when called as script
+if arg and arg[0] and arg[0]:match("test_noise_vectors%.lua$") then
+  -- Called as a standalone script
+  if #arg < 1 then
+    print("Usage: lua test_noise_vectors.lua <filename> [worker_id] [num_workers]")
+    os.exit(1)
+  end
+
+  local filename = arg[1]
+  local worker_id = arg[2] and tonumber(arg[2])
+  local num_workers = arg[3] and tonumber(arg[3])
+
+  -- Validate parallel args
+  if worker_id or num_workers then
+    assert(worker_id and num_workers, "Both worker_id and num_workers must be specified for parallel mode")
+    assert(worker_id >= 0 and worker_id < num_workers, "worker_id must be between 0 and num_workers-1")
+  end
+
+  local success = run_all_tests(filename, worker_id, num_workers)
+  os.exit(success and 0 or 1)
+else
+  -- Used as a module
+  return M
 end

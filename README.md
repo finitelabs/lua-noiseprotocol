@@ -1,10 +1,14 @@
 # lua-noiseprotocol
 
-A pure Lua implementation of the [Noise Protocol Framework](https://noiseprotocol.org) with **zero external dependencies**. This library provides a complete, portable implementation that runs on Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT.
+A pure Lua implementation of the
+[Noise Protocol Framework](https://noiseprotocol.org) with **zero external
+dependencies**. This library provides a complete, portable implementation that
+runs on Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT.
 
 ## Features
 
-- **Zero Dependencies**: Pure Lua implementation, no C extensions or external libraries required
+- **Zero Dependencies**: Pure Lua implementation, no C extensions or external
+  libraries required
 - **Portable**: Runs on any Lua interpreter (5.1+)
 - **Complete**: Full implementation of the Noise Protocol Framework
 - **Cryptographic Primitives**:
@@ -31,7 +35,7 @@ Add the `src` directory to your Lua path, or copy the files to your project.
 Here's a complete example of the Noise XX pattern from the specification:
 
 ```lua
-local noise = require("noise")
+local noise = require("noiseprotocol")
 
 -- Generate static keys for both parties
 local alice_static_key = noise.DH["25519"].generate_keypair()
@@ -68,12 +72,13 @@ alice:read_handshake_message(msg2)
 local msg3 = alice:write_handshake_message("")
 bob:read_handshake_message(msg3)
 
--- Handshake complete! 
+-- Handshake complete!
 -- Both parties now have authenticated each other's static keys
 print("Handshake complete!")
-print("Alice handshake hash:", alice:get_handshake_hash():sub(1, 16):gsub(".", function(c) 
-  return string.format("%02x", string.byte(c)) 
-end))
+-- Print first 16 bytes of handshake hash as hex
+local utils = require("noiseprotocol.utils")
+local hash = alice:get_handshake_hash()
+print("Alice handshake hash:", bytes.to_hex(hash):sub(1, 32)) -- 32 hex chars = 16 bytes
 
 -- Transport phase - send encrypted messages
 local ciphertext1 = alice:send_message("Hello Bob!")
@@ -120,26 +125,32 @@ LUA_BINARY=lua5.1 ./run_tests.sh
 
 ## Current Limitations
 
-- **X448 is not yet working** - The implementation has known issues and fails test vectors
+- **X448 is not yet working** - The implementation has known issues and fails
+  test vectors
 - Pure Lua performance is slower than native implementations
-- No constant-time guarantees (not suitable for production use without additional hardening)
+- No constant-time guarantees (not suitable for production use without
+  additional hardening)
 
 ## Future Plans
 
 - Fix X448 implementation
-- Add support for [lua-openssl](https://github.com/zhaozg/lua-openssl) as an optional backend
+- Add support for [lua-openssl](https://github.com/zhaozg/lua-openssl) as an
+  optional backend
 - Fallback system: use native crypto when available, pure Lua as fallback
 - Performance optimizations for the pure Lua implementation
 
 ## Security Warning
 
-This is a pure Lua implementation intended for portability and ease of use. While we implement the algorithms correctly and pass all test vectors, the implementation:
+This is a pure Lua implementation intended for portability and ease of use.
+While we implement the algorithms correctly and pass all test vectors, the
+implementation:
 
 - Cannot guarantee constant-time operations
 - Has not been independently audited
 - Is significantly slower than native implementations
 
-For production use, especially in security-critical applications, consider using native cryptographic libraries.
+For production use, especially in security-critical applications, consider using
+native cryptographic libraries.
 
 ## License
 
@@ -147,7 +158,8 @@ Apache License 2.0 - see LICENSE file for details
 
 ## Contributing
 
-Contributions are welcome! Please ensure all tests pass and add new tests for any new functionality.
+Contributions are welcome! Please ensure all tests pass and add new tests for
+any new functionality.
 
 ---
 

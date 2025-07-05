@@ -1,16 +1,17 @@
---- @module "crypto.x448"
+--- @module "noiseprotocol.crypto.x448"
 --- X448 Curve448 Elliptic Curve Diffie-Hellman Implementation for portability.
 
-local x448 = {}
+local utils = require("noiseprotocol.utils")
+local bit32 = utils.bit32
+local bytes = utils.bytes
 
--- Load utilities
-local utils = require("utils")
+local x448 = {}
 
 -- Field element is 2^448 - 2^224 - 1
 -- We use 16 limbs of 28 bits each (total 448 bits)
 -- This allows us to stay well within LuaJIT's 2^53-1 integer limit
 local LIMB_BITS = 28
-local LIMB_MASK = utils.lshift32(1, LIMB_BITS) - 1 -- 0xFFFFFFF
+local LIMB_MASK = bit32.lshift(1, LIMB_BITS) - 1 -- 0xFFFFFFF
 local NUM_LIMBS = 16
 
 --- Create a new field element initialized to zero
@@ -50,8 +51,8 @@ local function fe_reduce(a)
   local carry = 0
   for i = 0, NUM_LIMBS - 1 do
     carry = carry + (a[i] or 0)
-    a[i] = utils.band32(carry, LIMB_MASK)
-    carry = math.floor(carry / utils.lshift32(1, LIMB_BITS))
+    a[i] = bit32.band(carry, LIMB_MASK)
+    carry = math.floor(carry / bit32.lshift(1, LIMB_BITS))
   end
 
   -- Now we have overflow in 'carry' representing multiples of 2^448
@@ -66,8 +67,8 @@ local function fe_reduce(a)
     local new_carry = 0
     for i = 0, NUM_LIMBS - 1 do
       new_carry = new_carry + a[i]
-      a[i] = utils.band32(new_carry, LIMB_MASK)
-      new_carry = math.floor(new_carry / utils.lshift32(1, LIMB_BITS))
+      a[i] = bit32.band(new_carry, LIMB_MASK)
+      new_carry = math.floor(new_carry / bit32.lshift(1, LIMB_BITS))
     end
     carry = new_carry
   end
@@ -87,7 +88,7 @@ local function fe_reduce(a)
   -- limb 0
   local diff = tmp[0] - 0xFFFFFFE
   if diff < 0 then
-    tmp[0] = diff + utils.lshift32(1, LIMB_BITS)
+    tmp[0] = diff + bit32.lshift(1, LIMB_BITS)
     borrow = 1
   else
     tmp[0] = diff
@@ -98,7 +99,7 @@ local function fe_reduce(a)
   for i = 1, 7 do
     diff = tmp[i] - LIMB_MASK - borrow
     if diff < 0 then
-      tmp[i] = diff + utils.lshift32(1, LIMB_BITS)
+      tmp[i] = diff + bit32.lshift(1, LIMB_BITS)
       borrow = 1
     else
       tmp[i] = diff
@@ -109,7 +110,7 @@ local function fe_reduce(a)
   -- limb 8
   diff = tmp[8] - 0xFFFFFFE - borrow
   if diff < 0 then
-    tmp[8] = diff + utils.lshift32(1, LIMB_BITS)
+    tmp[8] = diff + bit32.lshift(1, LIMB_BITS)
     borrow = 1
   else
     tmp[8] = diff
@@ -120,7 +121,7 @@ local function fe_reduce(a)
   for i = 9, NUM_LIMBS - 1 do
     diff = tmp[i] - LIMB_MASK - borrow
     if diff < 0 then
-      tmp[i] = diff + utils.lshift32(1, LIMB_BITS)
+      tmp[i] = diff + bit32.lshift(1, LIMB_BITS)
       borrow = 1
     else
       tmp[i] = diff
@@ -160,7 +161,7 @@ local function fe_sub(a, b)
   for i = 0, NUM_LIMBS - 1 do
     local diff = (a[i] or 0) - (b[i] or 0) - borrow
     if diff < 0 then
-      r[i] = diff + utils.lshift32(1, LIMB_BITS)
+      r[i] = diff + bit32.lshift(1, LIMB_BITS)
       borrow = 1
     else
       r[i] = diff
@@ -339,13 +340,13 @@ local function fe_frombytes(bytes)
   for limb = 0, NUM_LIMBS - 1 do
     -- Collect 28 bits
     while bit_offset < LIMB_BITS and byte_idx <= 56 do
-      accumulator = accumulator + utils.lshift32(string.byte(bytes, byte_idx) or 0, bit_offset)
+      accumulator = accumulator + bit32.lshift(string.byte(bytes, byte_idx) or 0, bit_offset)
       bit_offset = bit_offset + 8
       byte_idx = byte_idx + 1
     end
 
-    r[limb] = utils.band32(accumulator, LIMB_MASK)
-    accumulator = utils.rshift32(accumulator, LIMB_BITS)
+    r[limb] = bit32.band(accumulator, LIMB_MASK)
+    accumulator = bit32.rshift(accumulator, LIMB_BITS)
     bit_offset = bit_offset - LIMB_BITS
   end
 
@@ -368,13 +369,13 @@ local function fe_tobytes(a)
   for byte_idx = 1, 56 do
     -- Get 8 bits
     while bits_available < 8 and limb_idx < NUM_LIMBS do
-      accumulator = accumulator + utils.lshift32(t[limb_idx] or 0, bits_available)
+      accumulator = accumulator + bit32.lshift(t[limb_idx] or 0, bits_available)
       bits_available = bits_available + LIMB_BITS
       limb_idx = limb_idx + 1
     end
 
-    bytes[byte_idx] = string.char(utils.band32(accumulator, 0xFF))
-    accumulator = utils.rshift32(accumulator, 8)
+    bytes[byte_idx] = string.char(bit32.band(accumulator, 0xFF))
+    accumulator = bit32.rshift(accumulator, 8)
     bits_available = bits_available - 8
   end
 
@@ -401,17 +402,17 @@ local function x448_scalarmult(scalar, base)
   for i = 1, 56 do
     k[i] = string.byte(scalar, i) or 0
   end
-  k[1] = utils.band32(k[1], 252) -- Clear low 2 bits
-  k[56] = utils.bor32(k[56], 128) -- Set high bit
+  k[1] = bit32.band(k[1], 252) -- Clear low 2 bits
+  k[56] = bit32.bor(k[56], 128) -- Set high bit
 
   -- Montgomery ladder
   local swap = 0
   for t = 447, 0, -1 do
     local byte = math.floor(t / 8) + 1
     local bit_pos = t % 8
-    local kt = utils.band32(utils.rshift32(k[byte], bit_pos), 1)
+    local kt = bit32.band(bit32.rshift(k[byte], bit_pos), 1)
 
-    swap = utils.bxor32(swap, kt)
+    swap = bit32.bxor(swap, kt)
     fe_cswap(x_2, x_3, swap)
     fe_cswap(z_2, z_3, swap)
     swap = kt
@@ -505,30 +506,30 @@ end
 local test_vectors = {
   {
     name = "RFC 7748 Test Vector 1",
-    scalar = utils.from_hex(
+    scalar = bytes.from_hex(
       "3d262fddf9ec8e88495266fea19a34d28882acef045104d0d1aae121"
         .. "700a779c984c24f8cdd78fbff44943eba368f54b29259a4f1c600ad3"
     ),
-    u_coord = utils.from_hex(
+    u_coord = bytes.from_hex(
       "06fce640fa3487bfda5f6cf2d5263f8aad88334cbd07437f020f08f9"
         .. "814dc031ddbdc38c19c6da2583fa5429db94ada18aa7a7fb4ef8a086"
     ),
-    expected = utils.from_hex(
+    expected = bytes.from_hex(
       "ce3e4ff95a60dc6697da1db1d85e6afbdf79b50a2412d7546d5f239f"
         .. "e14fbaadeb445fc66a01b0779d98223961111e21766282f73dd96b6f"
     ),
   },
   {
     name = "RFC 7748 Test Vector 2",
-    scalar = utils.from_hex(
+    scalar = bytes.from_hex(
       "203d494428b8399352665ddca42f9de8fef600908e0d461cb021f8c5"
         .. "38345dd77c3e4806e25f46d3315c44e0a5b4371282dd2c8d5be3095f"
     ),
-    u_coord = utils.from_hex(
+    u_coord = bytes.from_hex(
       "0fbcc2f993cd56d3305b0b7d9e55d4c1a8fb5dbb52f8e9a1e9b6201b"
         .. "165d015894e56c4d3570bee52fe205e28a78b91cdfbde71ce8d157db"
     ),
-    expected = utils.from_hex(
+    expected = bytes.from_hex(
       "884a02576239ff7a2f2f63b2db6a9ff37047ac13568e1e30fe63c4a7"
         .. "ad1b3ee3a5700df34321d62077e63633c575c1c954514e99da7c179d"
     ),
@@ -558,8 +559,8 @@ function x448.selftest()
         passed = passed + 1
       else
         print("  ❌ FAIL: " .. test.name)
-        print("    Expected: " .. utils.to_hex(test.expected))
-        print("    Got:      " .. utils.to_hex(result))
+        print("    Expected: " .. bytes.to_hex(test.expected))
+        print("    Got:      " .. bytes.to_hex(result))
       end
     end
 

@@ -1,9 +1,9 @@
---- @module "crypto.x25519"
+--- @module "noiseprotocol.crypto.x25519"
 --- X25519 Curve25519 Elliptic Curve Diffie-Hellman Implementation for portability.
 
 local x25519 = {}
 
-local utils = require("utils")
+local bytes = require("noiseprotocol.utils").bytes
 
 -- ============================================================================
 -- CURVE25519 FIELD ARITHMETIC
@@ -275,15 +275,15 @@ end
 local test_vectors = {
   {
     name = "RFC 7748 Test Vector 1",
-    scalar = utils.from_hex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4"),
-    u_coord = utils.from_hex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c"),
-    expected = utils.from_hex("c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552"),
+    scalar = bytes.from_hex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4"),
+    u_coord = bytes.from_hex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c"),
+    expected = bytes.from_hex("c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552"),
   },
   {
     name = "RFC 7748 Test Vector 2",
-    scalar = utils.from_hex("4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d"),
-    u_coord = utils.from_hex("e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493"),
-    expected = utils.from_hex("95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957"),
+    scalar = bytes.from_hex("4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d"),
+    u_coord = bytes.from_hex("e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493"),
+    expected = bytes.from_hex("95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957"),
   },
 }
 

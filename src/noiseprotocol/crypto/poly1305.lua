@@ -1,9 +1,11 @@
---- @module "crypto.poly1305"
+--- @module "noiseprotocol.crypto.poly1305"
 --- Poly1305 Message Authentication Code (MAC) Implementation for portability.
 
-local poly1305 = {}
+local utils = require("noiseprotocol.utils")
+local bit32 = utils.bit32
+local bytes = utils.bytes
 
-local utils = require("utils")
+local poly1305 = {}
 
 -- Type definitions for better type checking
 
@@ -163,13 +165,13 @@ function poly1305.authenticate(key, msg)
 
   -- Apply RFC 7539 clamping to ensure r has specific bit patterns
   -- This prevents certain classes of attacks and ensures key validity
-  r[4] = utils.band32(r[4], 15) -- Clear top 4 bits of 4th byte
-  r[5] = utils.band32(r[5], 252) -- Clear bottom 2 bits of 5th byte
-  r[8] = utils.band32(r[8], 15) -- Clear top 4 bits of 8th byte
-  r[9] = utils.band32(r[9], 252) -- Clear bottom 2 bits of 9th byte
-  r[12] = utils.band32(r[12], 15) -- Clear top 4 bits of 12th byte
-  r[13] = utils.band32(r[13], 252) -- Clear bottom 2 bits of 13th byte
-  r[16] = utils.band32(r[16], 15) -- Clear top 4 bits of 16th byte
+  r[4] = bit32.band(r[4], 15) -- Clear top 4 bits of 4th byte
+  r[5] = bit32.band(r[5], 252) -- Clear bottom 2 bits of 5th byte
+  r[8] = bit32.band(r[8], 15) -- Clear top 4 bits of 8th byte
+  r[9] = bit32.band(r[9], 252) -- Clear bottom 2 bits of 9th byte
+  r[12] = bit32.band(r[12], 15) -- Clear top 4 bits of 12th byte
+  r[13] = bit32.band(r[13], 252) -- Clear bottom 2 bits of 13th byte
+  r[16] = bit32.band(r[16], 15) -- Clear top 4 bits of 16th byte
 
   -- Extract s (second 16 bytes) - used for final addition
   local s = create_key_array(key_bytes, 17)
@@ -317,33 +319,35 @@ local test_vectors = {
   },
   {
     name = "RFC 8439 Test Vector #2 (r=0, long message)",
-    key = string.rep("\0", 16) .. utils.from_hex("36e5f6b5c5e06070f0efca96227a863e"),
+    key = string.rep("\0", 16) .. bytes.from_hex("36e5f6b5c5e06070f0efca96227a863e"),
     message = 'Any submission to the IETF intended by the Contributor for publication as all or part of an IETF Internet-Draft or RFC and any statement made within the context of an IETF activity is considered an "IETF Contribution". Such statements include oral statements in IETF sessions, as well as written and electronic communications made at any time or place, which are addressed to',
-    expected = utils.from_hex("36e5f6b5c5e06070f0efca96227a863e"),
+    expected = bytes.from_hex("36e5f6b5c5e06070f0efca96227a863e"),
   },
   {
     name = "RFC 8439 Test Vector #3 (r!=0, s=0)",
-    key = utils.from_hex("36e5f6b5c5e06070f0efca96227a863e") .. string.rep("\0", 16),
+    key = bytes.from_hex("36e5f6b5c5e06070f0efca96227a863e") .. string.rep("\0", 16),
     message = 'Any submission to the IETF intended by the Contributor for publication as all or part of an IETF Internet-Draft or RFC and any statement made within the context of an IETF activity is considered an "IETF Contribution". Such statements include oral statements in IETF sessions, as well as written and electronic communications made at any time or place, which are addressed to',
-    expected = utils.from_hex("f3477e7cd95417af89a6b8794c310cf0"),
+    expected = bytes.from_hex("f3477e7cd95417af89a6b8794c310cf0"),
   },
   {
     name = "Wrap test vector (tests modular reduction edge case)",
-    key = utils.from_hex("0200000000000000000000000000000000000000000000000000000000000000"),
+    key = bytes.from_hex("0200000000000000000000000000000000000000000000000000000000000000"),
     message = string.rep(string.char(255), 16),
-    expected = utils.from_hex("03000000000000000000000000000000"),
+    expected = bytes.from_hex("03000000000000000000000000000000"),
   },
   {
     name = "RFC 7539 test vector",
-    key = utils.from_hex("85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b"),
+    key = bytes.from_hex("85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b"),
     message = "Cryptographic Forum Research Group",
-    expected = utils.from_hex("a8061dc1305136c6c22b8baf0c0127a9"),
+    expected = bytes.from_hex("a8061dc1305136c6c22b8baf0c0127a9"),
   },
   {
     name = "NaCl test vector (tests complex multi-block processing)",
-    key = utils.from_hex("eea6a7251c1e72916d11c2cb214d3c252539121d8e234e652d651fa4c8cff880"),
-    message = utils.from_hex("8e993b9f48681273c29650ba32fc76ce48332ea7164d96a4476fb8c531a1186ac0dfc17c98dce87b4da7f011ec48c97271d2c20f9b928fe2270d6fb863d51738b48eeee314a7cc8ab932164548e526ae90224368517acfeabd6bb3732bc0e9da99832b61ca01b6de56244a9e88d5f9b37973f622a43d14a6599b1f654cb45a74e355a5"),
-    expected = utils.from_hex("f3ffc7703f9400e52a7dfb4b3d3305d9"),
+    key = bytes.from_hex("eea6a7251c1e72916d11c2cb214d3c252539121d8e234e652d651fa4c8cff880"),
+    message = bytes.from_hex(
+      "8e993b9f48681273c29650ba32fc76ce48332ea7164d96a4476fb8c531a1186ac0dfc17c98dce87b4da7f011ec48c97271d2c20f9b928fe2270d6fb863d51738b48eeee314a7cc8ab932164548e526ae90224368517acfeabd6bb3732bc0e9da99832b61ca01b6de56244a9e88d5f9b37973f622a43d14a6599b1f654cb45a74e355a5"
+    ),
+    expected = bytes.from_hex("f3ffc7703f9400e52a7dfb4b3d3305d9"),
   },
 }
 

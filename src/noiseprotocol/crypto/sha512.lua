@@ -1,21 +1,14 @@
---- @module "crypto.sha512"
+--- @module "noiseprotocol.crypto.sha512"
 --- Pure Lua SHA-512 Implementation for portability.
 
-local sha512 = {}
-
-local utils = require("utils")
-local bxor32 = utils.bxor32
+local utils = require("noiseprotocol.utils")
+local bit32 = utils.bit32
+local bit64 = utils.bit64
+local bytes = utils.bytes
 
 -- SHA-512 uses 64-bit words, but Lua numbers are limited to 2^53-1
 -- We'll work with 32-bit high/low pairs for 64-bit arithmetic
-
--- Import 64-bit operations from utils
-local add64 = utils.add64
-local ror64 = utils.ror64
-local shr64 = utils.shr64
-local xor64 = utils.xor64
-local and64 = utils.and64
-local not64 = utils.not64
+local sha512 = {}
 
 -- SHA-512 round constants (first 64 bits of fractional parts of cube roots of first 80 primes)
 --- @type Int64HighLow[]
@@ -121,28 +114,28 @@ local H0 = {
 --- @param x Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function Sigma0(x)
-  return xor64(xor64(ror64(x, 28), ror64(x, 34)), ror64(x, 39))
+  return bit64.xor(bit64.xor(bit64.ror(x, 28), bit64.ror(x, 34)), bit64.ror(x, 39))
 end
 
 --- SHA-512 Sigma1 function
 --- @param x Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function Sigma1(x)
-  return xor64(xor64(ror64(x, 14), ror64(x, 18)), ror64(x, 41))
+  return bit64.xor(bit64.xor(bit64.ror(x, 14), bit64.ror(x, 18)), bit64.ror(x, 41))
 end
 
 --- SHA-512 sigma0 function
 --- @param x Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function sigma0(x)
-  return xor64(xor64(ror64(x, 1), ror64(x, 8)), shr64(x, 7))
+  return bit64.xor(bit64.xor(bit64.ror(x, 1), bit64.ror(x, 8)), bit64.shr(x, 7))
 end
 
 --- SHA-512 sigma1 function
 --- @param x Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function sigma1(x)
-  return xor64(xor64(ror64(x, 19), ror64(x, 61)), shr64(x, 6))
+  return bit64.xor(bit64.xor(bit64.ror(x, 19), bit64.ror(x, 61)), bit64.shr(x, 6))
 end
 
 --- SHA-512 Ch function
@@ -151,7 +144,7 @@ end
 --- @param z Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function Ch(x, y, z)
-  return xor64(and64(x, y), and64(not64(x), z))
+  return bit64.xor(bit64.band(x, y), bit64.band(bit64.bnot(x), z))
 end
 
 --- SHA-512 Maj function
@@ -160,7 +153,7 @@ end
 --- @param z Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function Maj(x, y, z)
-  return xor64(xor64(and64(x, y), and64(x, z)), and64(y, z))
+  return bit64.xor(bit64.xor(bit64.band(x, y), bit64.band(x, z)), bit64.band(y, z))
 end
 
 --- SHA-512 core compression function
@@ -172,14 +165,14 @@ local function sha512_chunk(chunk, H)
 
   -- First 16 words are the message chunk
   for i = 1, 16 do
-    W[i] = utils.be_bytes_to_u64(chunk, (i - 1) * 8 + 1)
+    W[i] = bytes.be_bytes_to_u64(chunk, (i - 1) * 8 + 1)
   end
 
   -- Extend the first 16 words into the remaining 64 words
   for i = 17, 80 do
     local s0 = sigma0(W[i - 15])
     local s1 = sigma1(W[i - 2])
-    W[i] = add64(add64(add64(W[i - 16], s0), W[i - 7]), s1)
+    W[i] = bit64.add(bit64.add(bit64.add(W[i - 16], s0), W[i - 7]), s1)
   end
 
   -- Initialize working variables
@@ -190,30 +183,30 @@ local function sha512_chunk(chunk, H)
     local prime = assert(K[i], "Missing SHA-512 constant K[" .. i .. "]")
     local S1 = Sigma1(e)
     local ch = Ch(e, f, g)
-    local temp1 = add64(add64(add64(add64(h, S1), ch), prime), W[i])
+    local temp1 = bit64.add(bit64.add(bit64.add(bit64.add(h, S1), ch), prime), W[i])
     local S0 = Sigma0(a)
     local maj = Maj(a, b, c)
-    local temp2 = add64(S0, maj)
+    local temp2 = bit64.add(S0, maj)
 
     h = g
     g = f
     f = e
-    e = add64(d, temp1)
+    e = bit64.add(d, temp1)
     d = c
     c = b
     b = a
-    a = add64(temp1, temp2)
+    a = bit64.add(temp1, temp2)
   end
 
   -- Add compressed chunk to current hash value
-  H[1] = add64(H[1], a)
-  H[2] = add64(H[2], b)
-  H[3] = add64(H[3], c)
-  H[4] = add64(H[4], d)
-  H[5] = add64(H[5], e)
-  H[6] = add64(H[6], f)
-  H[7] = add64(H[7], g)
-  H[8] = add64(H[8], h)
+  H[1] = bit64.add(H[1], a)
+  H[2] = bit64.add(H[2], b)
+  H[3] = bit64.add(H[3], c)
+  H[4] = bit64.add(H[4], d)
+  H[5] = bit64.add(H[5], e)
+  H[6] = bit64.add(H[6], f)
+  H[7] = bit64.add(H[7], g)
+  H[8] = bit64.add(H[8], h)
 end
 
 --- Compute SHA-512 hash of input data
@@ -246,7 +239,7 @@ function sha512.sha512(data)
   -- Low 64 bits of length
   local len_high = math.floor(msg_len_bits / 0x100000000)
   local len_low = msg_len_bits % 0x100000000
-  data = data .. utils.u64_to_be_bytes({ len_high, len_low })
+  data = data .. bytes.u64_to_be_bytes({ len_high, len_low })
 
   -- Process message in 128-byte chunks
   for i = 1, #data, 128 do
@@ -259,7 +252,7 @@ function sha512.sha512(data)
   -- Produce final hash value as binary string
   local result = ""
   for i = 1, 8 do
-    result = result .. utils.u64_to_be_bytes(H[i])
+    result = result .. bytes.u64_to_be_bytes(H[i])
   end
 
   return result
@@ -269,7 +262,7 @@ end
 --- @param data string Input data to hash
 --- @return string hex 128-character hex string
 function sha512.sha512_hex(data)
-  return utils.to_hex(sha512.sha512(data))
+  return bytes.to_hex(sha512.sha512(data))
 end
 
 --- Compute HMAC-SHA512
@@ -294,8 +287,8 @@ function sha512.hmac_sha512(key, data)
   local opad = ""
   for i = 1, block_size do
     local byte = string.byte(key, i)
-    ipad = ipad .. string.char(bxor32(byte, 0x36))
-    opad = opad .. string.char(bxor32(byte, 0x5C))
+    ipad = ipad .. string.char(bit32.bxor(byte, 0x36))
+    opad = opad .. string.char(bit32.bxor(byte, 0x5C))
   end
 
   -- Compute HMAC = H(opad || H(ipad || data))
@@ -308,7 +301,7 @@ end
 --- @param data string Data to authenticate
 --- @return string hex 128-character hex string
 function sha512.hmac_sha512_hex(key, data)
-  return utils.to_hex(sha512.hmac_sha512(key, data))
+  return bytes.to_hex(sha512.hmac_sha512(key, data))
 end
 
 --- Test vectors from FIPS 180-4 and RFC 4634
@@ -336,9 +329,9 @@ local test_vectors = {
 }
 if os.getenv("INCLUDE_SLOW_TESTS") == "1" then
   table.insert(test_vectors, {
-   name = "RFC 4634 Test 5 - One million 'a' characters",
-   input = string.rep("a", 1000000),
-   expected = "e718483d0ce769644e2e42c7bc15b4638e1f98b13b2044285632a803afa973ebde0ff244877ea60a4cb0432ce577c31beb009c5c2c49aa2e4eadb217ad8cc09b",
+    name = "RFC 4634 Test 5 - One million 'a' characters",
+    input = string.rep("a", 1000000),
+    expected = "e718483d0ce769644e2e42c7bc15b4638e1f98b13b2044285632a803afa973ebde0ff244877ea60a4cb0432ce577c31beb009c5c2c49aa2e4eadb217ad8cc09b",
   })
 end
 
@@ -364,7 +357,7 @@ local hmac_test_vectors = {
   },
   {
     name = "RFC 4231 Test Case 4",
-    key = utils.from_hex("0102030405060708090a0b0c0d0e0f10111213141516171819"),
+    key = bytes.from_hex("0102030405060708090a0b0c0d0e0f10111213141516171819"),
     data = string.rep(string.char(0xcd), 50),
     expected = "b0ba465637458c6990e5a8c5f61d4af7e576d97ff94b872de76f8050361ee3dba91ca5c11aa25eb4d679275cc5788063a5f19741120c4f2de2adebeb10a298dd",
   },
@@ -445,7 +438,7 @@ function sha512.selftest()
   local test_msg = "test message"
   local binary_hash = sha512.sha512(test_msg)
   local hex_hash = sha512.sha512_hex(test_msg)
-  if hex_hash ~= utils.to_hex(binary_hash) then
+  if hex_hash ~= bytes.to_hex(binary_hash) then
     print("  ❌ FAIL: Binary and hex outputs inconsistent")
   else
     print("  ✅ PASS: Binary and hex outputs consistent")

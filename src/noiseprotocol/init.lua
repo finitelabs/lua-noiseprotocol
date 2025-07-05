@@ -1,16 +1,10 @@
---- @module "noise"
+--- @module "noiseprotocol"
 --- Noise Protocol Framework Implementation
 
-local noise = {}
+local crypto = require("noiseprotocol.crypto")
+local utils = require("noiseprotocol.utils")
 
--- Load dependencies
-local chacha20_poly1305 = require("crypto.chacha20_poly1305")
-local aes_gcm = require("crypto.aes_gcm")
-local sha256 = require("crypto.sha256")
-local sha512 = require("crypto.sha512")
-local blake2 = require("crypto.blake2")
-local x25519 = require("crypto.x25519")
-local x448 = require("crypto.x448")
+local noise = {}
 
 -- ============================================================================
 -- PROTOCOL NAME PARSING
@@ -149,13 +143,13 @@ local DH_25519 = {
   name = "25519",
   dhlen = 32,
   generate_keypair = function()
-    return x25519.generate_keypair()
+    return crypto.x25519.generate_keypair()
   end,
   dh = function(private_key, public_key)
-    return x25519.diffie_hellman(private_key, public_key)
+    return crypto.x25519.diffie_hellman(private_key, public_key)
   end,
   derive_public_key = function(private_key)
-    return x25519.derive_public_key(private_key)
+    return crypto.x25519.derive_public_key(private_key)
   end,
 }
 
@@ -163,15 +157,15 @@ local DH_25519 = {
 --- @type DHFunction
 local DH_448 = {
   name = "448",
-  dhlen = 32,
+  dhlen = 56,
   generate_keypair = function()
-    return x448.generate_keypair()
+    return crypto.x448.generate_keypair()
   end,
   dh = function(private_key, public_key)
-    return x448.diffie_hellman(private_key, public_key)
+    return crypto.x448.diffie_hellman(private_key, public_key)
   end,
   derive_public_key = function(private_key)
-    return x448.derive_public_key(private_key)
+    return crypto.x448.derive_public_key(private_key)
   end,
 }
 
@@ -197,14 +191,14 @@ local CIPHER_ChaChaPoly = {
   noncelen = 12,
   taglen = 16,
   encrypt = function(key, nonce, plaintext, ad)
-    return chacha20_poly1305.encrypt(key, make_chachapoly_nonce(nonce), plaintext, ad)
+    return crypto.chacha20_poly1305.encrypt(key, make_chachapoly_nonce(nonce), plaintext, ad)
   end,
   decrypt = function(key, nonce, ciphertext, ad)
-    return chacha20_poly1305.decrypt(key, make_chachapoly_nonce(nonce), ciphertext, ad)
+    return crypto.chacha20_poly1305.decrypt(key, make_chachapoly_nonce(nonce), ciphertext, ad)
   end,
   rekey = function(key)
     local dummy_nonce = string.rep(string.char(0xFF), 12)
-    local new_key = chacha20_poly1305.encrypt(key, dummy_nonce, string.rep("\0", 32), "")
+    local new_key = crypto.chacha20_poly1305.encrypt(key, dummy_nonce, string.rep("\0", 32), "")
     return new_key:sub(1, 32)
   end,
 }
@@ -236,14 +230,14 @@ local CIPHER_AESGCM = {
   noncelen = 12,
   taglen = 16,
   encrypt = function(key, nonce, plaintext, ad)
-    return aes_gcm.encrypt(key, make_aesgcm_nonce(nonce), plaintext, ad)
+    return crypto.aes_gcm.encrypt(key, make_aesgcm_nonce(nonce), plaintext, ad)
   end,
   decrypt = function(key, nonce, ciphertext, ad)
-    return aes_gcm.decrypt(key, make_aesgcm_nonce(nonce), ciphertext, ad)
+    return crypto.aes_gcm.decrypt(key, make_aesgcm_nonce(nonce), ciphertext, ad)
   end,
   rekey = function(key)
     local dummy_nonce = string.rep(string.char(0xFF), 12)
-    local new_key = aes_gcm.encrypt(key, dummy_nonce, string.rep("\0", 32), "")
+    local new_key = crypto.aes_gcm.encrypt(key, dummy_nonce, string.rep("\0", 32), "")
     return new_key:sub(1, 32)
   end,
 }
@@ -255,25 +249,25 @@ local HASH_SHA256 = {
   hashlen = 32,
   blocklen = 64,
   hash = function(data)
-    return sha256.sha256(data)
+    return crypto.sha256.sha256(data)
   end,
   hmac = function(key, data)
-    return sha256.hmac_sha256(key, data)
+    return crypto.sha256.hmac_sha256(key, data)
   end,
   hkdf = function(chaining_key, input_key_material, num_outputs)
     assert(num_outputs == 2 or num_outputs == 3, "num_outputs must be 2 or 3")
 
     -- HKDF Extract
-    local prk = sha256.hmac_sha256(chaining_key, input_key_material)
+    local prk = crypto.sha256.hmac_sha256(chaining_key, input_key_material)
 
     -- HKDF Expand
-    local t1 = sha256.hmac_sha256(prk, string.char(0x01))
-    local t2 = sha256.hmac_sha256(prk, t1 .. string.char(0x02))
+    local t1 = crypto.sha256.hmac_sha256(prk, string.char(0x01))
+    local t2 = crypto.sha256.hmac_sha256(prk, t1 .. string.char(0x02))
 
     if num_outputs == 2 then
       return t1, t2
     else
-      local t3 = sha256.hmac_sha256(prk, t2 .. string.char(0x03))
+      local t3 = crypto.sha256.hmac_sha256(prk, t2 .. string.char(0x03))
       return t1, t2, t3
     end
   end,
@@ -286,25 +280,25 @@ local HASH_SHA512 = {
   hashlen = 64,
   blocklen = 128,
   hash = function(data)
-    return sha512.sha512(data)
+    return crypto.sha512.sha512(data)
   end,
   hmac = function(key, data)
-    return sha512.hmac_sha512(key, data)
+    return crypto.sha512.hmac_sha512(key, data)
   end,
   hkdf = function(chaining_key, input_key_material, num_outputs)
     assert(num_outputs == 2 or num_outputs == 3, "num_outputs must be 2 or 3")
 
     -- HKDF Extract
-    local prk = sha512.hmac_sha512(chaining_key, input_key_material)
+    local prk = crypto.sha512.hmac_sha512(chaining_key, input_key_material)
 
     -- HKDF Expand
-    local t1 = sha512.hmac_sha512(prk, string.char(0x01))
-    local t2 = sha512.hmac_sha512(prk, t1 .. string.char(0x02))
+    local t1 = crypto.sha512.hmac_sha512(prk, string.char(0x01))
+    local t2 = crypto.sha512.hmac_sha512(prk, t1 .. string.char(0x02))
 
     if num_outputs == 2 then
       return t1, t2
     else
-      local t3 = sha512.hmac_sha512(prk, t2 .. string.char(0x03))
+      local t3 = crypto.sha512.hmac_sha512(prk, t2 .. string.char(0x03))
       return t1, t2, t3
     end
   end,
@@ -317,25 +311,25 @@ local HASH_BLAKE2S = {
   hashlen = 32,
   blocklen = 64,
   hash = function(data)
-    return blake2.blake2s(data)
+    return crypto.blake2.blake2s(data)
   end,
   hmac = function(key, data)
-    return blake2.hmac_blake2s(key, data)
+    return crypto.blake2.hmac_blake2s(key, data)
   end,
   hkdf = function(chaining_key, input_key_material, num_outputs)
     assert(num_outputs == 2 or num_outputs == 3, "num_outputs must be 2 or 3")
 
     -- HKDF Extract
-    local prk = blake2.hmac_blake2s(chaining_key, input_key_material)
+    local prk = crypto.blake2.hmac_blake2s(chaining_key, input_key_material)
 
     -- HKDF Expand
-    local t1 = blake2.hmac_blake2s(prk, string.char(0x01))
-    local t2 = blake2.hmac_blake2s(prk, t1 .. string.char(0x02))
+    local t1 = crypto.blake2.hmac_blake2s(prk, string.char(0x01))
+    local t2 = crypto.blake2.hmac_blake2s(prk, t1 .. string.char(0x02))
 
     if num_outputs == 2 then
       return t1, t2
     else
-      local t3 = blake2.hmac_blake2s(prk, t2 .. string.char(0x03))
+      local t3 = crypto.blake2.hmac_blake2s(prk, t2 .. string.char(0x03))
       return t1, t2, t3
     end
   end,
@@ -348,25 +342,25 @@ local HASH_BLAKE2B = {
   hashlen = 64,
   blocklen = 128,
   hash = function(data)
-    return blake2.blake2b(data)
+    return crypto.blake2.blake2b(data)
   end,
   hmac = function(key, data)
-    return blake2.hmac_blake2b(key, data)
+    return crypto.blake2.hmac_blake2b(key, data)
   end,
   hkdf = function(chaining_key, input_key_material, num_outputs)
     assert(num_outputs == 2 or num_outputs == 3, "num_outputs must be 2 or 3")
 
     -- HKDF Extract
-    local prk = blake2.hmac_blake2b(chaining_key, input_key_material)
+    local prk = crypto.blake2.hmac_blake2b(chaining_key, input_key_material)
 
     -- HKDF Expand
-    local t1 = blake2.hmac_blake2b(prk, string.char(0x01))
-    local t2 = blake2.hmac_blake2b(prk, t1 .. string.char(0x02))
+    local t1 = crypto.blake2.hmac_blake2b(prk, string.char(0x01))
+    local t2 = crypto.blake2.hmac_blake2b(prk, t1 .. string.char(0x02))
 
     if num_outputs == 2 then
       return t1, t2
     else
-      local t3 = blake2.hmac_blake2b(prk, t2 .. string.char(0x03))
+      local t3 = crypto.blake2.hmac_blake2b(prk, t2 .. string.char(0x03))
       return t1, t2, t3
     end
   end,
@@ -2195,5 +2189,9 @@ noise.NoiseConnection = NoiseConnection
 noise.CipherSuite = CipherSuite
 noise.PSKPlacement = PSKPlacement
 noise.NoisePattern = NoisePattern
+
+-- Export submodules for convenience
+noise.crypto = crypto
+noise.utils = utils
 
 return noise

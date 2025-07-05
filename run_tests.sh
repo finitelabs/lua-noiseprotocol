@@ -10,7 +10,7 @@
 #   ./run_tests.sh bitops poly1305    # Run only bitops and poly1305
 #   ./run_tests.sh noise              # Run only noise protocol tests
 #
-# Available modules: utils, poly1305, chacha20, chacha20_poly1305, aes_gcm, x25519, x448, sha256, sha512, blake2, noise, noise_vectors
+# Available modules: utils, utils_bit32, utils_bit64, utils_bytes, poly1305, chacha20, chacha20_poly1305, aes_gcm, x25519, x448, sha256, sha512, blake2, noise, noise_vectors
 
 set -e  # Exit on any error
 
@@ -33,24 +33,53 @@ FAILED_MODULES=()
 
 LUA_BINARY="${LUA_BINARY:-luajit}"  # Use luajit by default, can be overridden
 
+# Check if the lua binary is available
+if ! command -v "${LUA_BINARY}" &> /dev/null; then
+    echo -e "${RED}❌ Error: '${LUA_BINARY}' command not found.${NC}"
+    exit 1
+fi
+
 # Get script directory
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # Add repository root to Lua's package path
 # This allows require() to find modules in the repository root
 export LUA_PATH="$SCRIPT_DIR/?.lua;$SCRIPT_DIR/?/init.lua;$SCRIPT_DIR/src/?.lua;$SCRIPT_DIR/src/?/init.lua;$LUA_PATH"
+export SCRIPT_DIR
+
+# Define noise vector files
+NOISE_VECTOR_FILES=("cacophony.json" "snow.json" "snow_multi_psk.json")
 
 # Parse command line arguments to determine which modules to run
-DEFAULT_MODULES_TO_RUN=("utils" "poly1305" "chacha20" "chacha20_poly1305" "aes_gcm" "x25519" "sha256" "sha512" "blake2" "noise")
+DEFAULT_MODULES_TO_RUN=("utils_bit32" "utils_bit64" "utils_bytes" "poly1305" "chacha20" "chacha20_poly1305" "aes_gcm" "x25519" "sha256" "sha512" "blake2" "noise")
+ALL_VALID_MODULES=("utils_bit32" "utils_bit64" "utils_bytes" "poly1305" "chacha20" "chacha20_poly1305" "aes_gcm" "x25519" "sha256" "sha512" "blake2" "noise" "noise_vectors")
 MODULES_TO_RUN=("$@")
+
+# Validate modules if specified
+if [ ${#MODULES_TO_RUN[@]} -gt 0 ] && [ "${MODULES_TO_RUN[0]}" != "all" ]; then
+    for module in "${MODULES_TO_RUN[@]}"; do
+        valid=0
+        for valid_module in "${ALL_VALID_MODULES[@]}"; do
+            if [ "$module" = "$valid_module" ]; then
+                valid=1
+                break
+            fi
+        done
+        if [ $valid -eq 0 ]; then
+            echo -e "${RED}❌ Error: Unknown module '$module'${NC}"
+            echo "Available modules: ${ALL_VALID_MODULES[*]}"
+            exit 1
+        fi
+    done
+fi
+
 if [ ${#MODULES_TO_RUN[@]} -eq 0 ]; then
     # No arguments provided, run all modules except noise_vectors
     MODULES_TO_RUN=("${DEFAULT_MODULES_TO_RUN[@]}")
-    echo "Running all modules (excluding noise_vectors)..."
+    echo "Running default modules: ${MODULES_TO_RUN[*]}"
 elif [ "${MODULES_TO_RUN[0]}" = "all" ]; then
-    # "all" argument provided, run all modules including noise_vectors
-    MODULES_TO_RUN=("${DEFAULT_MODULES_TO_RUN[@]}" "noise_vectors")
-    echo "Running all modules (including noise_vectors)..."
+    MODULES_TO_RUN=("${ALL_VALID_MODULES[@]}")
+    echo "Running all modules: ${MODULES_TO_RUN[*]}"
 else
     echo "Running specified modules: ${MODULES_TO_RUN[*]}"
 fi
@@ -74,7 +103,7 @@ run_test() {
     local lua_command="$3"
 
     if ! should_run_module "$module_key"; then
-        return 0
+        return
     fi
 
     echo -e "${BLUE}Testing $module_name...${NC}"
@@ -94,111 +123,185 @@ run_test() {
     echo
 }
 
-# Check if the lua binary is available
-if ! command -v "${LUA_BINARY}" &> /dev/null; then
-    echo -e "${RED}❌ Error: '${LUA_BINARY}' command not found.${NC}"
-    exit 1
+run_selftest() {
+  local module_name="$1"
+  local module_key="$2"
+  local lua_module="$3"
+  run_test "${module_name}" "${module_key}" "
+    local result = require('${lua_module}').selftest()
+    if not result then
+        os.exit(1)
+    end
+  "
+}
+
+run_selftest "Utility Functions - 32-bit operations" "utils_bit32" "noiseprotocol.utils.bit32"
+run_selftest "Utility Functions - 64-bit operations" "utils_bit64" "noiseprotocol.utils.bit64"
+run_selftest "Utility Functions - Byte operations" "utils_bytes" "noiseprotocol.utils.bytes"
+run_selftest "Poly1305 MAC" "poly1305" "noiseprotocol.crypto.poly1305"
+run_selftest "ChaCha20 Stream Cipher" "chacha20" "noiseprotocol.crypto.chacha20"
+run_selftest "ChaCha20-Poly1305 AEAD" "chacha20_poly1305" "noiseprotocol.crypto.chacha20_poly1305"
+run_selftest "AESGCM AEAD" "aes_gcm" "noiseprotocol.crypto.aes_gcm"
+run_selftest "X25519 Curve25519 ECDH" "x25519" "noiseprotocol.crypto.x25519"
+run_selftest "X448 Curve448 ECDH" "x448" "noiseprotocol.crypto.x448"
+run_selftest "SHA-256 Cryptographic Hash" "sha256" "noiseprotocol.crypto.sha256"
+run_selftest "SHA-512 Cryptographic Hash" "sha512" "noiseprotocol.crypto.sha512"
+run_selftest "BLAKE2s/BLAKE2b Cryptographic Hash" "blake2" "noiseprotocol.crypto.blake2"
+run_selftest "Noise Protocol Framework" "noise" "noiseprotocol"
+
+# Function to run noise vectors in parallel
+run_noise_vectors_parallel() {
+    set +e  # Disable exit on error for parallel execution
+
+    echo -e "${BLUE}Testing Noise Vectors (Parallel)...${NC}"
+    echo "----------------------------------------"
+
+    TOTAL_MODULES=$((TOTAL_MODULES + 1))
+
+    local repo_root="$SCRIPT_DIR"
+    local temp_dir=$(mktemp -d)
+    local all_passed=true
+    local num_workers=${NOISE_VECTOR_WORKERS:-4}
+
+    # Show vector file info
+    echo "Analyzing vector files..."
+    for vector_file in "${NOISE_VECTOR_FILES[@]}"; do
+        local full_path="$repo_root/tests/vectors/$vector_file"
+        local info=$("${LUA_BINARY}" -e "
+            local tv = require('tests.test_noise_vectors')
+            local info = tv.get_vector_info('$full_path')
+            print(string.format('%d total, %d testable, %d skipped',
+                info.total, info.testable, info.skipped))
+        " 2>&1) || { echo "Error getting info: $info"; exit 1; }
+        echo "  $vector_file: $info"
+    done
+
+    echo
+    echo "Running with $num_workers parallel workers..."
+
+    # Process each vector file
+    for vector_file in "${NOISE_VECTOR_FILES[@]}"; do
+        local full_path="$repo_root/tests/vectors/$vector_file"
+        echo
+        echo "Processing $vector_file..."
+
+        # Launch parallel workers
+        local pids=()
+        for ((i=0; i<num_workers; i++)); do
+            (
+                "${LUA_BINARY}" "$repo_root/tests/test_noise_vectors.lua" \
+                    "$full_path" "$i" "$num_workers" \
+                    > "$temp_dir/worker_${vector_file}_${i}.out" 2>&1
+                echo $? > "$temp_dir/worker_${vector_file}_${i}.status"
+            ) &
+            pids+=($!)
+        done
+
+        # Wait for all workers to complete
+        for pid in "${pids[@]}"; do
+            wait $pid
+        done
+
+        # Collect results
+        local total_passed=0
+        local total_failed=0
+        local worker_failed=false
+
+        for ((i=0; i<num_workers; i++)); do
+            local status_file="$temp_dir/worker_${vector_file}_${i}.status"
+            local output_file="$temp_dir/worker_${vector_file}_${i}.out"
+
+            if [ -f "$status_file" ]; then
+                local status=$(cat "$status_file")
+                if [ "$status" -ne 0 ]; then
+                    worker_failed=true
+                fi
+            fi
+
+            if [ -f "$output_file" ]; then
+                # Parse results
+                local results=$(grep "^RESULTS:" "$output_file" | head -1)
+                if [ -n "$results" ]; then
+                    local passed=$(echo "$results" | cut -d: -f2)
+                    local failed=$(echo "$results" | cut -d: -f3)
+                    total_passed=$((total_passed + passed))
+                    total_failed=$((total_failed + failed))
+                fi
+
+                # Show errors if any
+                grep "^ERROR:" "$output_file" | while read -r line; do
+                    if [[ ! "$line" =~ ^RESULTS: ]]; then
+                      echo "${line#ERROR:}";
+                    fi
+                done
+            fi
+        done
+
+        echo "  Results: $total_passed passed, $total_failed failed"
+
+        if [ $total_failed -gt 0 ] || [ "$worker_failed" = true ]; then
+            all_passed=false
+        fi
+    done
+
+    # Clean up
+    rm -rf "$temp_dir"
+
+    echo
+    if [ "$all_passed" = true ]; then
+        echo -e "${GREEN}✅ Noise Vectors: ALL TESTS PASSED${NC}"
+        PASSED_MODULES+=("Noise Vectors")
+        PASSED_COUNT=$((PASSED_COUNT + 1))
+    else
+        echo -e "${RED}❌ Noise Vectors: TESTS FAILED${NC}"
+        FAILED_MODULES+=("Noise Vectors")
+    fi
+
+    echo
+
+    set -e  # Re-enable exit on error
+}
+
+# Function to run noise vectors sequentially
+run_noise_vectors_sequential() {
+    echo -e "${BLUE}Testing Noise Vectors (Sequential)...${NC}"
+    echo "----------------------------------------"
+    TOTAL_MODULES=$((TOTAL_MODULES + 1))
+
+    local all_success=true
+    for vector_file in "${NOISE_VECTOR_FILES[@]}"; do
+        echo "Processing $vector_file..."
+        if ! "${LUA_BINARY}" -e "
+            local tv = require('tests.test_noise_vectors')
+            local repo_root = os.getenv('SCRIPT_DIR') or '.'
+            local success = tv.run_all_tests(repo_root .. '/tests/vectors/$vector_file')
+            if not success then os.exit(1) end
+        " 2>&1; then
+            all_success=false
+        fi
+    done
+
+    if [ "$all_success" = true ]; then
+        echo -e "${GREEN}✅ Noise Vectors: ALL TESTS PASSED${NC}"
+        PASSED_MODULES+=("Noise Vectors")
+        PASSED_COUNT=$((PASSED_COUNT + 1))
+    else
+        echo -e "${RED}❌ Noise Vectors: TESTS FAILED${NC}"
+        FAILED_MODULES+=("Noise Vectors")
+    fi
+    echo
+}
+
+# Run noise vectors test
+if should_run_module "noise_vectors"; then
+    # Check if parallel execution is disabled
+    if [ "${NOISE_VECTOR_WORKERS:-0}" -le 1 ]; then
+        run_noise_vectors_sequential
+    else
+        # Run parallel version
+        run_noise_vectors_parallel
+    fi
 fi
-
-# Run utils tests
-run_test "Utility Functions (bit and bytes)" "utils" "
-local result = require('utils').selftest()
-if not result then
-    os.exit(1)
-end
-"
-
-# Run Poly1305 tests
-run_test "Poly1305 MAC" "poly1305" "
-local result = require('crypto.poly1305').selftest()
-if not result then
-    os.exit(1)
-end
-"
-
-# Run ChaCha20 tests
-run_test "ChaCha20 Stream Cipher" "chacha20" "
-local result = require('crypto.chacha20').selftest()
-if not result then
-    os.exit(1)
-end
-"
-
-# Run ChaCha20-Poly1305 AEAD tests
-run_test "ChaCha20-Poly1305 AEAD" "chacha20_poly1305" "
-local result = require('crypto.chacha20_poly1305').selftest()
-if not result then
-    os.exit(1)
-end
-"
-
-# Run AESGCM AEAD tests
-run_test "AESGCM AEAD" "aes_gcm" "
-local result = require('crypto.aes_gcm').selftest()
-if not result then
-    os.exit(1)
-end
-"
-
-# Run X25519 tests
-run_test "X25519 Curve25519 ECDH" "x25519" "
-local result = require('crypto.x25519').selftest()
-if not result then
-    os.exit(1)
-end
-"
-
-# Run X448 tests
-run_test "X448 Curve448 ECDH" "x448" "
-local result = require('crypto.x448').selftest()
-if not result then
-    os.exit(1)
-end
-"
-
-# Run SHA-256 tests
-run_test "SHA-256 Cryptographic Hash" "sha256" "
-local result = require('crypto.sha256').selftest()
-if not result then
-    os.exit(1)
-end
-"
-
-# Run SHA-512 tests
-run_test "SHA-512 Cryptographic Hash" "sha512" "
-local result = require('crypto.sha512').selftest()
-if not result then
-    os.exit(1)
-end
-"
-
-# Run BLAKE2 tests
-run_test "BLAKE2s/BLAKE2b Cryptographic Hash" "blake2" "
-local result = require('crypto.blake2').selftest()
-if not result then
-    os.exit(1)
-end
-"
-
-# Run Noise Protocol tests
-run_test "Noise Protocol Framework" "noise" "
-local result = require('noise').selftest()
-if not result then
-    os.exit(1)
-end
-"
-
-# Run Noise vector tests
-run_test "Noise Vectors" "noise_vectors" "
-local test_noise_vectors = require('tests.test_noise_vectors')
-local repo_root = os.getenv('SCRIPT_DIR') or '.'
-if not test_noise_vectors(repo_root .. \"/tests/vectors/cacophony_vectors.json\") then
-    os.exit(1)
-end
-if not test_noise_vectors(repo_root .. \"/tests/vectors/snow_vectors.json\") then
-    os.exit(1)
-end
-"
 
 # Summary
 echo "========================================="

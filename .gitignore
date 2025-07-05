@@ -41,3 +41,6 @@ luac.out
 
 # Dev
 node_modules/
+
+# Build artifacts
+build/

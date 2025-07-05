@@ -1,11 +1,11 @@
---- @module "crypto.chacha20_poly1305"
+--- @module "noiseprotocol.crypto.chacha20_poly1305"
 --- ChaCha20-Poly1305 Authenticated Encryption with Associated Data (AEAD) Implementation for portability.
 
-local chacha20_poly1305 = {}
+local bytes = require("noiseprotocol.utils").bytes
+local chacha20 = require("noiseprotocol.crypto.chacha20")
+local poly1305 = require("noiseprotocol.crypto.poly1305")
 
-local chacha20 = require("crypto.chacha20")
-local poly1305 = require("crypto.poly1305")
-local utils = require("utils")
+local chacha20_poly1305 = {}
 
 --- Generate Poly1305 one-time key using ChaCha20
 --- @param key string 32-byte ChaCha20 key
@@ -31,14 +31,14 @@ local function construct_aad_data(aad, ciphertext)
   local auth_data = ""
 
   -- Add AAD and pad to 16-byte boundary
-  auth_data = auth_data .. utils.pad_to_16(aad)
+  auth_data = auth_data .. bytes.pad_to_16(aad)
 
   -- Add ciphertext and pad to 16-byte boundary
-  auth_data = auth_data .. utils.pad_to_16(ciphertext)
+  auth_data = auth_data .. bytes.pad_to_16(ciphertext)
 
   -- Add lengths as 64-bit little-endian integers
-  auth_data = auth_data .. utils.u64_to_le_bytes(aad_len)
-  auth_data = auth_data .. utils.u64_to_le_bytes(ciphertext_len)
+  auth_data = auth_data .. bytes.u64_to_le_bytes(aad_len)
+  auth_data = auth_data .. bytes.u64_to_le_bytes(ciphertext_len)
 
   return auth_data
 end
@@ -129,24 +129,26 @@ end
 local test_vectors = {
   {
     name = "RFC 8439 Section 2.8.2 Test Vector",
-    key = utils.from_hex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"),
-    nonce = utils.from_hex("070000004041424344454647"),
-    aad = utils.from_hex("50515253c0c1c2c3c4c5c6c7"),
+    key = bytes.from_hex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"),
+    nonce = bytes.from_hex("070000004041424344454647"),
+    aad = bytes.from_hex("50515253c0c1c2c3c4c5c6c7"),
     plaintext = "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.",
-    expected = utils.from_hex("d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecbd0600691"),
+    expected = bytes.from_hex(
+      "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b61161ae10b594f09e26a7e902ecbd0600691"
+    ),
   },
   {
     name = "Poly1305 key generation test",
-    key = utils.from_hex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"),
-    nonce = utils.from_hex("000000000001020304050607"),
+    key = bytes.from_hex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"),
+    nonce = bytes.from_hex("000000000001020304050607"),
     aad = "",
     plaintext = "",
-    expected_poly_key = utils.from_hex("8ad5a08b905f81cc815040274ab29471a833b637e3fd0da508dbb8e2fdd1a646"),
+    expected_poly_key = bytes.from_hex("8ad5a08b905f81cc815040274ab29471a833b637e3fd0da508dbb8e2fdd1a646"),
   },
   {
     name = "Roundtrip test with various inputs",
-    key = utils.from_hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"),
-    nonce = utils.from_hex("000000000000004a00000000"),
+    key = bytes.from_hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"),
+    nonce = bytes.from_hex("000000000000004a00000000"),
     aad = "Additional authenticated data",
     plaintext = "Hello, ChaCha20-Poly1305 AEAD!",
   },
@@ -160,7 +162,7 @@ local test_vectors = {
   {
     name = "Empty plaintext roundtrip test",
     key = string.rep(string.char(0xff), 32),
-    nonce = utils.from_hex("0102030405060708090a0b0c"),
+    nonce = bytes.from_hex("0102030405060708090a0b0c"),
     aad = "Only authenticating this data",
     plaintext = "",
   },

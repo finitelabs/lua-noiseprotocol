@@ -1,9 +1,11 @@
---- @module "crypto.chacha20"
+--- @module "noiseprotocol.crypto.chacha20"
 --- ChaCha20 Stream Cipher Implementation for portability.
 
-local chacha20 = {}
+local utils = require("noiseprotocol.utils")
+local bit32 = utils.bit32
+local bytes = utils.bytes
 
-local utils = require("utils")
+local chacha20 = {}
 
 -- Type definitions for better type checking
 
@@ -69,17 +71,17 @@ end
 --- @param c integer Index of third word
 --- @param d integer Index of fourth word
 local function quarter_round(state, a, b, c, d)
-  state[a] = utils.add32(state[a], state[b])
-  state[d] = utils.rol32(utils.bxor32(state[d], state[a]), 16)
+  state[a] = bit32.add(state[a], state[b])
+  state[d] = bit32.rol(bit32.bxor(state[d], state[a]), 16)
 
-  state[c] = utils.add32(state[c], state[d])
-  state[b] = utils.rol32(utils.bxor32(state[b], state[c]), 12)
+  state[c] = bit32.add(state[c], state[d])
+  state[b] = bit32.rol(bit32.bxor(state[b], state[c]), 12)
 
-  state[a] = utils.add32(state[a], state[b])
-  state[d] = utils.rol32(utils.bxor32(state[d], state[a]), 8)
+  state[a] = bit32.add(state[a], state[b])
+  state[d] = bit32.rol(bit32.bxor(state[d], state[a]), 8)
 
-  state[c] = utils.add32(state[c], state[d])
-  state[b] = utils.rol32(utils.bxor32(state[b], state[c]), 7)
+  state[c] = bit32.add(state[c], state[d])
+  state[b] = bit32.rol(bit32.bxor(state[b], state[c]), 7)
 end
 
 --- Initialize ChaCha20 state with key, nonce, and counter
@@ -159,7 +161,7 @@ local function chacha20_block(key, nonce, counter)
 
   -- Add original state to working state
   for i = 1, 16 do
-    working_state[i] = utils.add32(working_state[i], state[i])
+    working_state[i] = bit32.add(working_state[i], state[i])
   end
 
   -- Convert state to byte string (little-endian)
@@ -194,7 +196,7 @@ function chacha20.crypt(key, nonce, plaintext, counter)
     for i = 1, block_size do
       local plaintext_byte = string.byte(plaintext, offset + i - 1)
       local keystream_byte = string.byte(keystream, i)
-      result = result .. string.char(utils.bxor32(plaintext_byte, keystream_byte))
+      result = result .. string.char(bit32.bxor(plaintext_byte, keystream_byte))
     end
 
     offset = offset + 64
@@ -228,27 +230,33 @@ end
 local test_vectors = {
   {
     name = "RFC 8439 Test Vector 1 - ChaCha20 Block Function",
-    key = utils.from_hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"),
-    nonce = utils.from_hex("000000090000004a00000000"),
+    key = bytes.from_hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"),
+    nonce = bytes.from_hex("000000090000004a00000000"),
     counter = 1,
     plaintext = "", -- Empty for block function test
-    expected_keystream = utils.from_hex("10f1e7e4d13b5915500fdd1fa32071c4c7d1f4c733c068030422aa9ac3d46c4ed2826446079faa0914c2d705d98b02a2b5129cd1de164eb9cbd083e8a2503c4e"),
+    expected_keystream = bytes.from_hex(
+      "10f1e7e4d13b5915500fdd1fa32071c4c7d1f4c733c068030422aa9ac3d46c4ed2826446079faa0914c2d705d98b02a2b5129cd1de164eb9cbd083e8a2503c4e"
+    ),
   },
   {
     name = "RFC 8439 Test Vector 2 - ChaCha20 Encryption",
-    key = utils.from_hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"),
-    nonce = utils.from_hex("000000000000004a00000000"),
+    key = bytes.from_hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"),
+    nonce = bytes.from_hex("000000000000004a00000000"),
     counter = 1,
     plaintext = "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.",
-    expected_ciphertext = utils.from_hex("6e2e359a2568f98041ba0728dd0d6981e97e7aec1d4360c20a27afccfd9fae0bf91b65c5524733ab8f593dabcd62b3571639d624e65152ab8f530c359f0861d807ca0dbf500d6a6156a38e088a22b65e52bc514d16ccf806818ce91ab77937365af90bbf74a35be6b40b8eedf2785e42874d"),
+    expected_ciphertext = bytes.from_hex(
+      "6e2e359a2568f98041ba0728dd0d6981e97e7aec1d4360c20a27afccfd9fae0bf91b65c5524733ab8f593dabcd62b3571639d624e65152ab8f530c359f0861d807ca0dbf500d6a6156a38e088a22b65e52bc514d16ccf806818ce91ab77937365af90bbf74a35be6b40b8eedf2785e42874d"
+    ),
   },
   {
     name = "RFC 8439 Test Vector 3 - Key and IV setup",
-    key = utils.from_hex("1c9240a5eb55d38af333888604f6b5f0473917c1402b80099dca5cbc207075c0"),
-    nonce = utils.from_hex("000000000000000000000002"),
+    key = bytes.from_hex("1c9240a5eb55d38af333888604f6b5f0473917c1402b80099dca5cbc207075c0"),
+    nonce = bytes.from_hex("000000000000000000000002"),
     counter = 42,
     plaintext = "'Twas brillig, and the slithy toves\nDid gyre and gimble in the wabe:\nAll mimsy were the borogoves,\nAnd the mome raths outgrabe.",
-    expected_ciphertext = utils.from_hex("62e6347f95ed87a45ffae7426f27a1df5fb69110044c0d73118effa95b01e5cf166d3df2d721caf9b21e5fb14c616871fd84c54f9d65b283196c7fe4f60553ebf39c6402c42234e32a356b3e764312a61a5532055716ead6962568f87d3f3f7704c6a8d1bcd1bf4d50d6154b6da731b187b58dfd728afa36757a797ac188d1"),
+    expected_ciphertext = bytes.from_hex(
+      "62e6347f95ed87a45ffae7426f27a1df5fb69110044c0d73118effa95b01e5cf166d3df2d721caf9b21e5fb14c616871fd84c54f9d65b283196c7fe4f60553ebf39c6402c42234e32a356b3e764312a61a5532055716ead6962568f87d3f3f7704c6a8d1bcd1bf4d50d6154b6da731b187b58dfd728afa36757a797ac188d1"
+    ),
   },
   {
     name = "Zero key test",
@@ -256,7 +264,9 @@ local test_vectors = {
     nonce = string.rep("\0", 12),
     counter = 0,
     plaintext = string.rep("\0", 64),
-    expected_ciphertext = utils.from_hex("76b8e0ada0f13d90405d6ae55386bd28bdd219b8a08ded1aa836efcc8b770dc7da41597c5157488d7724e03fb8d84a376a43b8f41518a11cc387b669b2ee6586"),
+    expected_ciphertext = bytes.from_hex(
+      "76b8e0ada0f13d90405d6ae55386bd28bdd219b8a08ded1aa836efcc8b770dc7da41597c5157488d7724e03fb8d84a376a43b8f41518a11cc387b669b2ee6586"
+    ),
   },
 }
 
