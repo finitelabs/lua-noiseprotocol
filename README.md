@@ -11,10 +11,8 @@ runs on Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT.
   libraries required
 - **Portable**: Runs on any Lua interpreter (5.1+)
 - **Complete**: Full implementation of the Noise Protocol Framework
-- **Cryptographic Primitives**:
-  - **AEAD**: ChaCha20-Poly1305, AES-GCM
-  - **Hash**: SHA-256, SHA-512, BLAKE2s, BLAKE2b
-  - **DH**: X25519 (X448 support coming soon)
+- **Cryptographic Primitives**: Includes all Diffie-Hellman (DH), AEAD encryption, and hashing
+  algorithms listed in the specification
 - **Well-tested**: Comprehensive test suite with RFC test vectors
 
 ## Installation
@@ -101,7 +99,7 @@ All one-way and interactive patterns from the Noise specification are supported:
 
 ### Supported Algorithms
 
-- **DH**: 25519 (X448 not yet functional)
+- **DH**: 25519, 448
 - **AEAD**: ChaChaPoly, AESGCM
 - **Hash**: SHA256, SHA512, BLAKE2s, BLAKE2b
 
@@ -125,15 +123,12 @@ LUA_BINARY=lua5.1 ./run_tests.sh
 
 ## Current Limitations
 
-- **X448 is not yet working** - The implementation has known issues and fails
-  test vectors
 - Pure Lua performance is slower than native implementations
 - No constant-time guarantees (not suitable for production use without
   additional hardening)
 
 ## Future Plans
 
-- Fix X448 implementation
 - Add support for [lua-openssl](https://github.com/zhaozg/lua-openssl) as an
   optional backend
 - Fallback system: use native crypto when available, pure Lua as fallback

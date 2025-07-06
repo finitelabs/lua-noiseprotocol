@@ -38,6 +38,8 @@ if ! command -v "${LUA_BINARY}" &> /dev/null; then
     echo -e "${RED}❌ Error: '${LUA_BINARY}' command not found.${NC}"
     exit 1
 fi
+echo "Lua version: $(${LUA_BINARY} -v)"
+echo
 
 # Get script directory
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -48,11 +50,12 @@ export LUA_PATH="$SCRIPT_DIR/?.lua;$SCRIPT_DIR/?/init.lua;$SCRIPT_DIR/src/?.lua;
 export SCRIPT_DIR
 
 # Define noise vector files
+NOISE_VECTORS_DIR="${NOISE_VECTORS_DIR:=vectors_sampled}"
 NOISE_VECTOR_FILES=("cacophony.json" "snow.json" "snow_multi_psk.json")
 
 # Parse command line arguments to determine which modules to run
-DEFAULT_MODULES_TO_RUN=("utils_bit32" "utils_bit64" "utils_bytes" "poly1305" "chacha20" "chacha20_poly1305" "aes_gcm" "x25519" "sha256" "sha512" "blake2" "noise")
-ALL_VALID_MODULES=("utils_bit32" "utils_bit64" "utils_bytes" "poly1305" "chacha20" "chacha20_poly1305" "aes_gcm" "x25519" "sha256" "sha512" "blake2" "noise" "noise_vectors")
+DEFAULT_MODULES_TO_RUN=("utils_bit32" "utils_bit64" "utils_bytes" "poly1305" "chacha20" "chacha20_poly1305" "aes_gcm" "x25519" "x448" "sha256" "sha512" "blake2" "noise")
+ALL_VALID_MODULES=("utils_bit32" "utils_bit64" "utils_bytes" "poly1305" "chacha20" "chacha20_poly1305" "aes_gcm" "x25519" "x448" "sha256" "sha512" "blake2" "noise" "noise_vectors")
 MODULES_TO_RUN=("$@")
 
 # Validate modules if specified
@@ -166,12 +169,10 @@ run_noise_vectors_parallel() {
     # Show vector file info
     echo "Analyzing vector files..."
     for vector_file in "${NOISE_VECTOR_FILES[@]}"; do
-        local full_path="$repo_root/tests/vectors/$vector_file"
         local info=$("${LUA_BINARY}" -e "
             local tv = require('tests.test_noise_vectors')
-            local info = tv.get_vector_info('$full_path')
-            print(string.format('%d total, %d testable, %d skipped',
-                info.total, info.testable, info.skipped))
+            local info = tv.get_vector_info('$repo_root/tests/${NOISE_VECTORS_DIR}/$vector_file')
+            print(string.format('%d total', info.total))
         " 2>&1) || { echo "Error getting info: $info"; exit 1; }
         echo "  $vector_file: $info"
     done
@@ -181,7 +182,6 @@ run_noise_vectors_parallel() {
 
     # Process each vector file
     for vector_file in "${NOISE_VECTOR_FILES[@]}"; do
-        local full_path="$repo_root/tests/vectors/$vector_file"
         echo
         echo "Processing $vector_file..."
 
@@ -190,7 +190,7 @@ run_noise_vectors_parallel() {
         for ((i=0; i<num_workers; i++)); do
             (
                 "${LUA_BINARY}" "$repo_root/tests/test_noise_vectors.lua" \
-                    "$full_path" "$i" "$num_workers" \
+                    "$repo_root/tests/${NOISE_VECTORS_DIR}/$vector_file" "$i" "$num_workers" \
                     > "$temp_dir/worker_${vector_file}_${i}.out" 2>&1
                 echo $? > "$temp_dir/worker_${vector_file}_${i}.status"
             ) &
@@ -268,20 +268,21 @@ run_noise_vectors_sequential() {
     echo "----------------------------------------"
     TOTAL_MODULES=$((TOTAL_MODULES + 1))
 
-    local all_success=true
+    local all_passed=true
     for vector_file in "${NOISE_VECTOR_FILES[@]}"; do
         echo "Processing $vector_file..."
         if ! "${LUA_BINARY}" -e "
             local tv = require('tests.test_noise_vectors')
             local repo_root = os.getenv('SCRIPT_DIR') or '.'
-            local success = tv.run_all_tests(repo_root .. '/tests/vectors/$vector_file')
+            local vectors_dir = os.getenv('NOISE_VECTORS_DIR') or 'vectors_sampled'
+            local success = tv.run_all_tests(repo_root .. '/tests/' .. vectors_dir .. '/$vector_file')
             if not success then os.exit(1) end
         " 2>&1; then
-            all_success=false
+            all_passed=false
         fi
     done
 
-    if [ "$all_success" = true ]; then
+    if [ "$all_passed" = true ]; then
         echo -e "${GREEN}✅ Noise Vectors: ALL TESTS PASSED${NC}"
         PASSED_MODULES+=("Noise Vectors")
         PASSED_COUNT=$((PASSED_COUNT + 1))

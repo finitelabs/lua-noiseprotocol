@@ -6,7 +6,7 @@ local bit32 = require("noiseprotocol.utils.bit32")
 local bit64 = {}
 
 -- Type definitions
---- @alias Int64HighLow table<integer, integer> Array with [1]=high 32 bits, [2]=low 32 bits
+--- @alias Int64HighLow [integer, integer] Array with [1]=high 32 bits, [2]=low 32 bits
 
 --- 64-bit addition
 --- @param a Int64HighLow First operand {high, low}
@@ -116,6 +116,13 @@ function bit64.selftest()
   local passed = 0
   local total = 0
 
+  --- @class B64TestVector
+  --- @field name string Test name
+  --- @field fn fun(...): Int64HighLow Function to test
+  --- @field inputs any Input values
+  --- @field expected Int64HighLow Expected result {high, low}
+
+  --- @type B64TestVector[]
   local test_vectors = {
     -- Addition tests
     {
@@ -327,10 +334,11 @@ function bit64.selftest()
       expected = { 0, 0x00001234 },
     },
   }
+  ---@diagnostic disable-next-line: access-invisible
+  local unpack_fn = unpack or table.unpack
 
   for _, test in ipairs(test_vectors) do
     total = total + 1
-    local unpack_fn = unpack or table.unpack
     local result = test.fn(unpack_fn(test.inputs))
     if result[1] == test.expected[1] and result[2] == test.expected[2] then
       print("  ✅ PASS: " .. test.name)

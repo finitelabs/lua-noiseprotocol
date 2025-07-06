@@ -25,11 +25,6 @@ local function psks_from_hex(hex_psks)
   return psks
 end
 
-local function should_skip_vector(vector)
-  -- FIXME: Skip test vectors that use 448 DH function (not supported)
-  return vector.protocol_name:find("_448_") ~= nil
-end
-
 --- Run a single test vector
 --- @param vector table Test vector data
 --- @return boolean success True if test passed
@@ -157,53 +152,46 @@ local function run_all_tests(filename, worker_id, num_workers)
   for idx, vector in ipairs(vectors) do
     -- Skip if this vector is not assigned to this worker
     if not worker_id or ((idx - 1) % num_workers == worker_id) then
-      if not should_skip_vector(vector) then
-        -- Initialize results tracking for this configuration
-        local key = vector.protocol_name:gsub("^Noise_[^_]+_", "")
-        if not results[key] then
-          results[key] = { passed = 0, failed = 0 }
-        end
+      -- Initialize results tracking for this configuration
+      local key = vector.protocol_name:gsub("^Noise_[^_]+_", "")
+      if not results[key] then
+        results[key] = { passed = 0, failed = 0 }
+      end
 
-        local success, test_passed, test_errors = pcall(run_test_vector, vector)
+      local success, test_passed, test_errors = pcall(run_test_vector, vector)
 
-        if success then
-          if test_passed then
-            passed = passed + 1
-            results[key].passed = results[key].passed + 1
-            if not worker_id then -- Only print in sequential mode
-              print("✅ PASSED: " .. vector.protocol_name)
-            end
-          else
-            failed = failed + 1
-            results[key].failed = results[key].failed + 1
-            table.insert(errors_list, {
-              protocol = vector.protocol_name,
-              errors = test_errors,
-            })
-            if not worker_id then -- Only print in sequential mode
-              print("\n❌ FAILED: " .. vector.protocol_name)
-              for _, err in ipairs(test_errors) do
-                print("  " .. err)
-              end
-            end
+      if success then
+        if test_passed then
+          passed = passed + 1
+          results[key].passed = results[key].passed + 1
+          if not worker_id then -- Only print in sequential mode
+            print("✅ PASSED: " .. vector.protocol_name)
           end
         else
-          -- Error in test execution
           failed = failed + 1
           results[key].failed = results[key].failed + 1
           table.insert(errors_list, {
             protocol = vector.protocol_name,
-            errors = { tostring(test_passed) }, -- test_passed contains the error message
+            errors = test_errors,
           })
           if not worker_id then -- Only print in sequential mode
-            print("\n❌ ERROR: " .. vector.protocol_name)
-            print("  " .. tostring(test_passed))
+            print("\n❌ FAILED: " .. vector.protocol_name)
+            for _, err in ipairs(test_errors) do
+              print("  " .. err)
+            end
           end
         end
       else
-        -- Skip this vector
+        -- Error in test execution
+        failed = failed + 1
+        results[key].failed = results[key].failed + 1
+        table.insert(errors_list, {
+          protocol = vector.protocol_name,
+          errors = { tostring(test_passed) }, -- test_passed contains the error message
+        })
         if not worker_id then -- Only print in sequential mode
-          print("⏭ SKIPPED: " .. vector.protocol_name)
+          print("\n❌ ERROR: " .. vector.protocol_name)
+          print("  " .. tostring(test_passed))
         end
       end
     end
@@ -228,7 +216,6 @@ local function run_all_tests(filename, worker_id, num_workers)
   print("\n\nTest Results:")
   print(string.format("  ✅ Passed:  %d", passed))
   print(string.format("  ❌ Failed:  %d", failed))
-  print(string.format("  ⏭  Skipped: %d", #vectors - passed - failed))
 
   -- Print summary by configuration
   print("\nResults by configuration:")
@@ -261,18 +248,9 @@ end
 local function get_vector_info(filename)
   local vectors = parse_vectors(filename)
   local total = #vectors
-  local skipped = 0
-
-  for _, vector in ipairs(vectors) do
-    if should_skip_vector(vector) then
-      skipped = skipped + 1
-    end
-  end
 
   return {
     total = total,
-    testable = total - skipped,
-    skipped = skipped,
   }
 end
 

@@ -3,7 +3,7 @@
 
 local x25519 = {}
 
-local bytes = require("noiseprotocol.utils").bytes
+local utils = require("noiseprotocol.utils")
 
 -- ============================================================================
 -- CURVE25519 FIELD ARITHMETIC
@@ -187,21 +187,21 @@ end
 --- @param s string Input string
 --- @return integer[] byte_array Byte array
 local function string_to_bytes(s)
-  local bytes = {}
+  local b = {}
   for i = 1, #s do
-    bytes[i - 1] = string.byte(s, i)
+    b[i - 1] = string.byte(s, i)
   end
-  return bytes
+  return b
 end
 
 --- Convert byte array to string
---- @param bytes integer[] Byte array
+--- @param b integer[] Byte array
 --- @param len integer Length
 --- @return string result Output string
-local function bytes_to_string(bytes, len)
+local function bytes_to_string(b, len)
   local result = ""
   for i = 0, len - 1 do
-    result = result .. string.char(bytes[i] or 0)
+    result = result .. string.char(b[i] or 0)
   end
   return result
 end
@@ -275,15 +275,15 @@ end
 local test_vectors = {
   {
     name = "RFC 7748 Test Vector 1",
-    scalar = bytes.from_hex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4"),
-    u_coord = bytes.from_hex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c"),
-    expected = bytes.from_hex("c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552"),
+    scalar = utils.bytes.from_hex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4"),
+    u_coord = utils.bytes.from_hex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c"),
+    expected = utils.bytes.from_hex("c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552"),
   },
   {
     name = "RFC 7748 Test Vector 2",
-    scalar = bytes.from_hex("4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d"),
-    u_coord = bytes.from_hex("e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493"),
-    expected = bytes.from_hex("95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957"),
+    scalar = utils.bytes.from_hex("4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d"),
+    u_coord = utils.bytes.from_hex("e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493"),
+    expected = utils.bytes.from_hex("95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957"),
   },
 }
 
@@ -393,9 +393,9 @@ function x25519.selftest()
     -- Test 4: Different keys produce different shared secrets
     total = total + 1
     success, err = pcall(function()
-      local alice_priv, alice_pub = x25519.generate_keypair()
-      local bob_priv, bob_pub = x25519.generate_keypair()
-      local charlie_priv, charlie_pub = x25519.generate_keypair()
+      local alice_priv, _alice_pub = x25519.generate_keypair()
+      local _bob_priv, bob_pub = x25519.generate_keypair()
+      local _charlie_priv, charlie_pub = x25519.generate_keypair()
 
       local alice_bob = x25519.diffie_hellman(alice_priv, bob_pub)
       local alice_charlie = x25519.diffie_hellman(alice_priv, charlie_pub)
@@ -414,7 +414,7 @@ function x25519.selftest()
     total = total + 1
     success, err = pcall(function()
       local zero_key = string.rep("\0", 32)
-      local priv, pub = x25519.generate_keypair()
+      local priv, _pub = x25519.generate_keypair()
 
       -- This should not crash, though result may be predictable
       local result = x25519.diffie_hellman(priv, zero_key)
