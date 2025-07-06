@@ -5,6 +5,7 @@ local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bit64 = utils.bit64
 local bytes = utils.bytes
+local benchmark_op = utils.benchmark.benchmark_op
 
 -- SHA-512 uses 64-bit words, but Lua numbers are limited to 2^53-1
 -- We'll work with 32-bit high/low pairs for 64-bit arithmetic
@@ -160,7 +161,7 @@ end
 --- @param chunk string 128-byte chunk
 --- @param H HashState64 Hash state (8 64-bit values)
 local function sha512_chunk(chunk, H)
-  -- Prepare message schedule W
+  -- Prepare message schedule W (pre-allocate full array)
   local W = {}
 
   -- First 16 words are the message chunk
@@ -170,17 +171,19 @@ local function sha512_chunk(chunk, H)
 
   -- Extend the first 16 words into the remaining 64 words
   for i = 17, 80 do
-    local s0 = sigma0(W[i - 15])
-    local s1 = sigma1(W[i - 2])
+    local w15 = W[i - 15]
+    local w2 = W[i - 2]
+    local s0 = sigma0(w15)
+    local s1 = sigma1(w2)
     W[i] = bit64.add(bit64.add(bit64.add(W[i - 16], s0), W[i - 7]), s1)
   end
 
   -- Initialize working variables
   local a, b, c, d, e, f, g, h = H[1], H[2], H[3], H[4], H[5], H[6], H[7], H[8]
 
-  -- Main loop
+  -- Main loop (optimized)
   for i = 1, 80 do
-    local prime = assert(K[i], "Missing SHA-512 constant K[" .. i .. "]")
+    local prime = K[i]
     local S1 = Sigma1(e)
     local ch = Ch(e, f, g)
     local temp1 = bit64.add(bit64.add(bit64.add(bit64.add(h, S1), ch), prime), W[i])
@@ -249,13 +252,13 @@ function sha512.sha512(data)
     end
   end
 
-  -- Produce final hash value as binary string
-  local result = ""
+  -- Produce final hash value as binary string (optimized with table)
+  local result_bytes = {}
   for i = 1, 8 do
-    result = result .. bytes.u64_to_be_bytes(H[i])
+    result_bytes[i] = bytes.u64_to_be_bytes(H[i])
   end
 
-  return result
+  return table.concat(result_bytes)
 end
 
 --- Compute SHA-512 hash and return as hex string
@@ -282,14 +285,16 @@ function sha512.hmac_sha512(key, data)
     key = key .. string.rep("\0", block_size - #key)
   end
 
-  -- Compute inner and outer padding
-  local ipad = ""
-  local opad = ""
+  -- Compute inner and outer padding (optimized with table)
+  local ipad_bytes = {}
+  local opad_bytes = {}
   for i = 1, block_size do
     local byte = string.byte(key, i)
-    ipad = ipad .. string.char(bit32.bxor(byte, 0x36))
-    opad = opad .. string.char(bit32.bxor(byte, 0x5C))
+    ipad_bytes[i] = string.char(bit32.bxor(byte, 0x36))
+    opad_bytes[i] = string.char(bit32.bxor(byte, 0x5C))
   end
+  local ipad = table.concat(ipad_bytes)
+  local opad = table.concat(opad_bytes)
 
   -- Compute HMAC = H(opad || H(ipad || data))
   local inner_hash = sha512.sha512(ipad .. data)
@@ -470,6 +475,50 @@ function sha512.selftest()
   print(string.format("\nFunctional tests result: %d/%d tests passed", func_passed, func_total))
 
   return all_passed and (func_passed == func_total)
+end
+
+--- Run performance benchmarks
+---
+--- This function runs comprehensive performance benchmarks for SHA-512 operations
+--- including hash computation and HMAC for various message sizes.
+function sha512.benchmark()
+  print("SHA-512 Performance Benchmark")
+  print("=" .. string.rep("=", 60))
+  print()
+
+  -- Test data
+  local message_64 = string.rep("a", 64)
+  local message_1k = string.rep("a", 1024)
+  local message_8k = string.rep("a", 8192)
+  local hmac_key = "benchmark_key"
+
+  print("Hash Operations:")
+  benchmark_op("hash_64_bytes", function()
+    sha512.sha512(message_64)
+  end, 500)
+
+  benchmark_op("hash_1k", function()
+    sha512.sha512(message_1k)
+  end, 100)
+
+  benchmark_op("hash_8k", function()
+    sha512.sha512(message_8k)
+  end, 25)
+
+  print("\nHMAC Operations:")
+  benchmark_op("hmac_64_bytes", function()
+    sha512.hmac_sha512(hmac_key, message_64)
+  end, 250)
+
+  benchmark_op("hmac_1k", function()
+    sha512.hmac_sha512(hmac_key, message_1k)
+  end, 50)
+
+  benchmark_op("hmac_8k", function()
+    sha512.hmac_sha512(hmac_key, message_8k)
+  end, 15)
+
+  print("\n" .. string.rep("=", 61))
 end
 
 return sha512

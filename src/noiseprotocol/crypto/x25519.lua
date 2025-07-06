@@ -4,6 +4,9 @@
 local x25519 = {}
 
 local utils = require("noiseprotocol.utils")
+local bit32 = utils.bit32
+local bytes = utils.bytes
+local benchmark_op = utils.benchmark.benchmark_op
 
 -- ============================================================================
 -- CURVE25519 FIELD ARITHMETIC
@@ -154,7 +157,9 @@ local function scalarmult(out, scalar, point)
   clam[0] = clam[0] - (clam[0] % 8)
   clam[31] = scalar[31] % 64 + 64
   for i = 254, 0, -1 do
-    local bit = (clam[math.floor(i / 8)] / math.pow(2, i % 8) - (clam[math.floor(i / 8)] / math.pow(2, i % 8)) % 1) % 2
+    local byte_idx = math.floor(i / 8)
+    local bit_idx = i % 8
+    local bit = bit32.band(bit32.rshift(clam[byte_idx], bit_idx), 1)
     swap(a, b, bit)
     swap(c, d, bit)
     add(e, a, c)
@@ -199,11 +204,11 @@ end
 --- @param len integer Length
 --- @return string result Output string
 local function bytes_to_string(b, len)
-  local result = ""
+  local result_bytes = {}
   for i = 0, len - 1 do
-    result = result .. string.char(b[i] or 0)
+    result_bytes[i + 1] = string.char(b[i] or 0)
   end
-  return result
+  return table.concat(result_bytes)
 end
 
 -- ============================================================================
@@ -218,11 +223,11 @@ function x25519.generate_private_key()
   x25519._key_counter = counter + 1
   math.randomseed(os.time() + os.clock() * 1000000 + counter)
 
-  local key = ""
-  for _ = 1, 32 do
-    key = key .. string.char(math.random(0, 255))
+  local key_bytes = {}
+  for i = 1, 32 do
+    key_bytes[i] = string.char(math.random(0, 255))
   end
-  return key
+  return table.concat(key_bytes)
 end
 
 --- Derive public key from private key
@@ -437,6 +442,35 @@ function x25519.selftest()
   local functional_passed = functional_tests()
 
   return vectors_passed and functional_passed
+end
+
+--- Run performance benchmarks
+---
+--- This function runs comprehensive performance benchmarks for X25519 operations
+--- including key generation, public key derivation, and Diffie-Hellman operations.
+function x25519.benchmark()
+  print("X25519 Performance Benchmark")
+  print("=" .. string.rep("=", 60))
+  print()
+
+  -- Test data from RFC 7748
+  local test_scalar = bytes.from_hex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4")
+  local test_point = bytes.from_hex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c")
+
+  print("Key Operations:")
+  benchmark_op("generate_keypair", function()
+    x25519.generate_keypair()
+  end, 20)
+
+  benchmark_op("derive_public_key", function()
+    x25519.derive_public_key(test_scalar)
+  end, 50)
+
+  benchmark_op("diffie_hellman", function()
+    x25519.diffie_hellman(test_scalar, test_point)
+  end, 50)
+
+  print("\n" .. string.rep("=", 61))
 end
 
 return x25519

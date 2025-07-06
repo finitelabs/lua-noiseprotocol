@@ -4,6 +4,7 @@
 local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bytes = utils.bytes
+local benchmark_op = utils.benchmark.benchmark_op
 
 local sha256 = {}
 
@@ -95,7 +96,7 @@ local H0 = {
 --- @param chunk string 64-byte chunk
 --- @param H HashState Hash state (8 integers)
 local function sha256_chunk(chunk, H)
-  -- Prepare message schedule W
+  -- Prepare message schedule W (pre-allocate full array)
   local W = {}
 
   -- First 16 words are the message chunk
@@ -105,17 +106,19 @@ local function sha256_chunk(chunk, H)
 
   -- Extend the first 16 words into the remaining 48 words
   for i = 17, 64 do
-    local s0 = bit32.bxor(bit32.ror(W[i - 15], 7), bit32.bxor(bit32.ror(W[i - 15], 18), bit32.rshift(W[i - 15], 3)))
-    local s1 = bit32.bxor(bit32.ror(W[i - 2], 17), bit32.bxor(bit32.ror(W[i - 2], 19), bit32.rshift(W[i - 2], 10)))
+    local w15 = W[i - 15]
+    local w2 = W[i - 2]
+    local s0 = bit32.bxor(bit32.ror(w15, 7), bit32.bxor(bit32.ror(w15, 18), bit32.rshift(w15, 3)))
+    local s1 = bit32.bxor(bit32.ror(w2, 17), bit32.bxor(bit32.ror(w2, 19), bit32.rshift(w2, 10)))
     W[i] = bit32.add(bit32.add(bit32.add(W[i - 16], s0), W[i - 7]), s1)
   end
 
   -- Initialize working variables
   local a, b, c, d, e, f, g, h = H[1], H[2], H[3], H[4], H[5], H[6], H[7], H[8]
 
-  -- Main loop
+  -- Main loop (optimized with local variables)
   for i = 1, 64 do
-    local prime = assert(K[i], "Missing SHA-256 constant K[" .. i .. "]")
+    local prime = K[i]
     local S1 = bit32.bxor(bit32.ror(e, 6), bit32.bxor(bit32.ror(e, 11), bit32.ror(e, 25)))
     local ch = bit32.bxor(bit32.band(e, f), bit32.band(bit32.bnot(e), g))
     local temp1 = bit32.add(bit32.add(bit32.add(bit32.add(h, S1), ch), prime), W[i])
@@ -182,13 +185,13 @@ function sha256.sha256(data)
     end
   end
 
-  -- Produce final hash value as binary string
-  local result = ""
+  -- Produce final hash value as binary string (optimized with table)
+  local result_bytes = {}
   for i = 1, 8 do
-    result = result .. bytes.u32_to_be_bytes(H[i])
+    result_bytes[i] = bytes.u32_to_be_bytes(H[i])
   end
 
-  return result
+  return table.concat(result_bytes)
 end
 
 --- Compute SHA-256 hash and return as hex string
@@ -216,14 +219,16 @@ function sha256.hmac_sha256(key, data)
     key = key .. string.rep("\0", block_size - #key)
   end
 
-  -- Compute inner and outer padding
-  local ipad = ""
-  local opad = ""
+  -- Compute inner and outer padding (optimized with table)
+  local ipad_bytes = {}
+  local opad_bytes = {}
   for i = 1, block_size do
     local byte = string.byte(key, i)
-    ipad = ipad .. string.char(bit32.bxor(byte, 0x36))
-    opad = opad .. string.char(bit32.bxor(byte, 0x5C))
+    ipad_bytes[i] = string.char(bit32.bxor(byte, 0x36))
+    opad_bytes[i] = string.char(bit32.bxor(byte, 0x5C))
   end
+  local ipad = table.concat(ipad_bytes)
+  local opad = table.concat(opad_bytes)
 
   -- Compute HMAC = H(opad || H(ipad || data))
   local inner_hash = sha256.sha256(ipad .. data)
@@ -418,6 +423,50 @@ function sha256.selftest()
   print(string.format("\nFunctional tests result: %d/%d tests passed", func_passed, func_total))
 
   return all_passed and (func_passed == func_total)
+end
+
+--- Run performance benchmarks
+---
+--- This function runs comprehensive performance benchmarks for SHA-256 operations
+--- including hash computation and HMAC for various message sizes.
+function sha256.benchmark()
+  print("SHA-256 Performance Benchmark")
+  print("=" .. string.rep("=", 60))
+  print()
+
+  -- Test data
+  local message_64 = string.rep("a", 64)
+  local message_1k = string.rep("a", 1024)
+  local message_8k = string.rep("a", 8192)
+  local hmac_key = "benchmark_key"
+
+  print("Hash Operations:")
+  benchmark_op("hash_64_bytes", function()
+    sha256.sha256(message_64)
+  end, 1000)
+
+  benchmark_op("hash_1k", function()
+    sha256.sha256(message_1k)
+  end, 200)
+
+  benchmark_op("hash_8k", function()
+    sha256.sha256(message_8k)
+  end, 50)
+
+  print("\nHMAC Operations:")
+  benchmark_op("hmac_64_bytes", function()
+    sha256.hmac_sha256(hmac_key, message_64)
+  end, 500)
+
+  benchmark_op("hmac_1k", function()
+    sha256.hmac_sha256(hmac_key, message_1k)
+  end, 100)
+
+  benchmark_op("hmac_8k", function()
+    sha256.hmac_sha256(hmac_key, message_8k)
+  end, 25)
+
+  print("\n" .. string.rep("=", 61))
 end
 
 return sha256

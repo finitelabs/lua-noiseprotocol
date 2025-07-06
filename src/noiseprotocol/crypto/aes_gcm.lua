@@ -4,6 +4,7 @@
 local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bytes = utils.bytes
+local benchmark_op = utils.benchmark.benchmark_op
 
 local aes_gcm = {}
 
@@ -476,15 +477,17 @@ local function aes_encrypt_block(input, expanded_key, nr)
   shift_rows(state)
   add_round_key(state, expanded_key, nr)
 
-  -- Convert state to output
-  local output = ""
+  -- Convert state to output (optimized with table)
+  local output_bytes = {}
+  local idx = 1
   for j = 0, 3 do
     for i = 0, 3 do
-      output = output .. string.char(state[i][j])
+      output_bytes[idx] = string.char(state[i][j])
+      idx = idx + 1
     end
   end
 
-  return output
+  return table.concat(output_bytes)
 end
 
 -- ============================================================================
@@ -594,16 +597,20 @@ end
 --- @return string keystream Generated keystream
 local function generate_keystream(key, iv, length)
   local expanded_key, nr = key_expansion(key)
-  local keystream = ""
+  local keystream_blocks = {}
+  local total_length = 0
 
   -- Initial counter value: IV || 0x00000002
   local counter = iv .. string.rep("\0", 3) .. string.char(0x02)
 
-  while #keystream < length do
-    keystream = keystream .. aes_encrypt_block(counter, expanded_key, nr)
+  while total_length < length do
+    local block = aes_encrypt_block(counter, expanded_key, nr)
+    keystream_blocks[#keystream_blocks + 1] = block
+    total_length = total_length + #block
     counter = inc_counter(counter)
   end
 
+  local keystream = table.concat(keystream_blocks)
   return string.sub(keystream, 1, length)
 end
 
@@ -1000,6 +1007,66 @@ function aes_gcm.selftest()
   local functional_passed = functional_tests()
 
   return vectors_passed and functional_passed
+end
+
+--- Run performance benchmarks
+---
+--- This function runs comprehensive performance benchmarks for AES-GCM operations
+--- including authenticated encryption and decryption for various message and key sizes.
+function aes_gcm.benchmark()
+  print("AES-GCM Performance Benchmark")
+  print("=" .. string.rep("=", 60))
+  print()
+
+  -- Test data
+  local key128 = bytes.from_hex("feffe9928665731c6d6a8f9467308308")
+  local key256 = bytes.from_hex("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308")
+  local nonce = bytes.from_hex("cafebabefacedbaddecaf888")
+  local aad = "feedfacedeadbeeffeedfacedeadbeefabaddad2"
+  local plaintext_64 = string.rep("a", 64)
+  local plaintext_1k = string.rep("a", 1024)
+  local plaintext_8k = string.rep("a", 8192)
+
+  print("AES-128-GCM Encryption:")
+  benchmark_op("aes128_encrypt_64_bytes", function()
+    aes_gcm.encrypt(key128, nonce, plaintext_64, aad)
+  end, 200)
+
+  benchmark_op("aes128_encrypt_1k", function()
+    aes_gcm.encrypt(key128, nonce, plaintext_1k, aad)
+  end, 50)
+
+  benchmark_op("aes128_encrypt_8k", function()
+    aes_gcm.encrypt(key128, nonce, plaintext_8k, aad)
+  end, 10)
+
+  print("\nAES-256-GCM Encryption:")
+  benchmark_op("aes256_encrypt_64_bytes", function()
+    aes_gcm.encrypt(key256, nonce, plaintext_64, aad)
+  end, 200)
+
+  benchmark_op("aes256_encrypt_1k", function()
+    aes_gcm.encrypt(key256, nonce, plaintext_1k, aad)
+  end, 50)
+
+  benchmark_op("aes256_encrypt_8k", function()
+    aes_gcm.encrypt(key256, nonce, plaintext_8k, aad)
+  end, 10)
+
+  -- Pre-generate ciphertexts for decryption benchmarks
+  local ct128_64 = aes_gcm.encrypt(key128, nonce, plaintext_64, aad)
+  local ct256_1k = aes_gcm.encrypt(key256, nonce, plaintext_1k, aad)
+
+  print("\nDecryption Operations:")
+  benchmark_op("aes128_decrypt_64_bytes", function()
+    aes_gcm.decrypt(key128, nonce, ct128_64, aad)
+  end, 200)
+
+  benchmark_op("aes256_decrypt_1k", function()
+    aes_gcm.decrypt(key256, nonce, ct256_1k, aad)
+  end, 50)
+
+  print("\n" .. string.rep("=", 61))
 end
 
 return aes_gcm
