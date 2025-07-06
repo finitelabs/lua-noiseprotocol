@@ -1,7 +1,9 @@
 --- @module "noiseprotocol.crypto.chacha20_poly1305"
 --- ChaCha20-Poly1305 Authenticated Encryption with Associated Data (AEAD) Implementation for portability.
 
-local bytes = require("noiseprotocol.utils").bytes
+local utils = require("noiseprotocol.utils")
+local bytes = utils.bytes
+local benchmark_op = utils.benchmark.benchmark_op
 local chacha20 = require("noiseprotocol.crypto.chacha20")
 local poly1305 = require("noiseprotocol.crypto.poly1305")
 
@@ -28,19 +30,14 @@ local function construct_aad_data(aad, ciphertext)
 
   -- Construct the data to authenticate according to RFC 8439:
   -- AAD || pad16(AAD) || ciphertext || pad16(ciphertext) || num_to_8_le_bytes(aad_len) || num_to_8_le_bytes(ciphertext_len)
-  local auth_data = ""
+  local auth_parts = {
+    bytes.pad_to_16(aad),
+    bytes.pad_to_16(ciphertext),
+    bytes.u64_to_le_bytes(aad_len),
+    bytes.u64_to_le_bytes(ciphertext_len),
+  }
 
-  -- Add AAD and pad to 16-byte boundary
-  auth_data = auth_data .. bytes.pad_to_16(aad)
-
-  -- Add ciphertext and pad to 16-byte boundary
-  auth_data = auth_data .. bytes.pad_to_16(ciphertext)
-
-  -- Add lengths as 64-bit little-endian integers
-  auth_data = auth_data .. bytes.u64_to_le_bytes(aad_len)
-  auth_data = auth_data .. bytes.u64_to_le_bytes(ciphertext_len)
-
-  return auth_data
+  return table.concat(auth_parts)
 end
 
 -- ============================================================================
@@ -363,6 +360,57 @@ function chacha20_poly1305.selftest()
   local functional_passed = functional_tests()
 
   return vectors_passed and functional_passed
+end
+
+--- Run performance benchmarks
+---
+--- This function runs comprehensive performance benchmarks for ChaCha20-Poly1305 operations
+--- including authenticated encryption and decryption for various message sizes.
+function chacha20_poly1305.benchmark()
+  print("ChaCha20-Poly1305 Performance Benchmark")
+  print("=" .. string.rep("=", 60))
+  print()
+
+  -- Test data
+  local key = bytes.from_hex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f")
+  local nonce = bytes.from_hex("070000004041424344454647")
+  local aad = "Additional authenticated data"
+  local plaintext_64 = string.rep("a", 64)
+  local plaintext_1k = string.rep("a", 1024)
+  local plaintext_8k = string.rep("a", 8192)
+
+  print("Authenticated Encryption Operations:")
+  benchmark_op("encrypt_64_bytes", function()
+    chacha20_poly1305.encrypt(key, nonce, plaintext_64, aad)
+  end, 500)
+
+  benchmark_op("encrypt_1k", function()
+    chacha20_poly1305.encrypt(key, nonce, plaintext_1k, aad)
+  end, 100)
+
+  benchmark_op("encrypt_8k", function()
+    chacha20_poly1305.encrypt(key, nonce, plaintext_8k, aad)
+  end, 25)
+
+  -- Pre-generate ciphertexts for decryption benchmarks
+  local ct_64 = chacha20_poly1305.encrypt(key, nonce, plaintext_64, aad)
+  local ct_1k = chacha20_poly1305.encrypt(key, nonce, plaintext_1k, aad)
+  local ct_8k = chacha20_poly1305.encrypt(key, nonce, plaintext_8k, aad)
+
+  print("\nAuthenticated Decryption Operations:")
+  benchmark_op("decrypt_64_bytes", function()
+    chacha20_poly1305.decrypt(key, nonce, ct_64, aad)
+  end, 500)
+
+  benchmark_op("decrypt_1k", function()
+    chacha20_poly1305.decrypt(key, nonce, ct_1k, aad)
+  end, 100)
+
+  benchmark_op("decrypt_8k", function()
+    chacha20_poly1305.decrypt(key, nonce, ct_8k, aad)
+  end, 25)
+
+  print("\n" .. string.rep("=", 61))
 end
 
 return chacha20_poly1305

@@ -22,6 +22,17 @@ test-matrix-%:
 test-%:
 	./run_tests.sh $*
 
+# Run benchmarks
+.PHONY: bench
+bench:
+	./run_benchmarks.sh
+
+# Run specific benchmark suite
+.PHONY: bench-%
+bench-%:
+	./run_benchmarks.sh $*
+
+
 build/amalg.cache: src/noiseprotocol/init.lua
 	@echo "Generating amalgamation cache..."
 	@mkdir -p build
@@ -132,6 +143,10 @@ help:
 	@echo "  make test              - Run all tests"
 	@echo "  make test-<name>       - Run specific test (e.g., make test-x25519)"
 	@echo "  make test-matrix       - Run test matrix across Lua versions"
+	@echo ""
+	@echo "Benchmarking:"
+	@echo "  make bench             - Run all benchmarks"
+	@echo "  make bench-<name>      - Run specific benchmark (e.g., make bench-x25519)"
 	@echo ""
 	@echo "Building:"
 	@echo "  make build             - Build single-file distributions"

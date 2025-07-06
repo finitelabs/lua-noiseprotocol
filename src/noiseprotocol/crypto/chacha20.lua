@@ -4,6 +4,7 @@
 local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bytes = utils.bytes
+local benchmark_op = utils.benchmark.benchmark_op
 
 local chacha20 = {}
 
@@ -92,7 +93,7 @@ end
 local function chacha20_init(key, nonce, counter)
   assert(#key == 32, "Key must be exactly 32 bytes")
   assert(#nonce == 12, "Nonce must be exactly 12 bytes")
-  assert(counter >= 0 and counter < math.pow(2, 32), "Counter must be a valid 32-bit integer")
+  assert(counter >= 0 and counter < 0x100000000, "Counter must be a valid 32-bit integer")
 
   local state = create_word_array()
 
@@ -164,14 +165,14 @@ local function chacha20_block(key, nonce, counter)
     working_state[i] = bit32.add(working_state[i], state[i])
   end
 
-  -- Convert state to byte string (little-endian)
-  local result = ""
+  -- Convert state to byte string (little-endian) - optimized with table
+  local result_bytes = {}
   for i = 1, 16 do
     local b1, b2, b3, b4 = word_to_bytes(working_state[i])
-    result = result .. string.char(b1, b2, b3, b4)
+    result_bytes[i] = string.char(b1, b2, b3, b4)
   end
 
-  return result
+  return table.concat(result_bytes)
 end
 
 --- ChaCha20 encryption/decryption (same operation)
@@ -183,7 +184,8 @@ end
 function chacha20.crypt(key, nonce, plaintext, counter)
   counter = counter or 1
 
-  local result = ""
+  local result_bytes = {}
+  local result_idx = 1
   local offset = 1
   local data_len = #plaintext
 
@@ -191,19 +193,20 @@ function chacha20.crypt(key, nonce, plaintext, counter)
     -- Generate keystream block
     local keystream = chacha20_block(key, nonce, counter)
 
-    -- XOR with plaintext
+    -- XOR with plaintext (optimized with table)
     local block_size = math.min(64, data_len - offset + 1)
     for i = 1, block_size do
       local plaintext_byte = string.byte(plaintext, offset + i - 1)
       local keystream_byte = string.byte(keystream, i)
-      result = result .. string.char(bit32.bxor(plaintext_byte, keystream_byte))
+      result_bytes[result_idx] = string.char(bit32.bxor(plaintext_byte, keystream_byte))
+      result_idx = result_idx + 1
     end
 
     offset = offset + 64
     counter = counter + 1
   end
 
-  return result
+  return table.concat(result_bytes)
 end
 
 --- Convenience function for encryption (same as crypt)
@@ -457,6 +460,38 @@ function chacha20.selftest()
   local functional_passed = functional_tests()
 
   return vectors_passed and functional_passed
+end
+
+--- Run performance benchmarks
+---
+--- This function runs comprehensive performance benchmarks for ChaCha20 operations
+--- including block generation and stream encryption/decryption.
+function chacha20.benchmark()
+  print("ChaCha20 Performance Benchmark")
+  print("=" .. string.rep("=", 60))
+  print()
+
+  -- Test data
+  local key = bytes.from_hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+  local nonce = bytes.from_hex("000000090000004a00000000")
+  local plaintext_64 = string.rep("a", 64)
+  local plaintext_1k = string.rep("a", 1024)
+  local plaintext_8k = string.rep("a", 8192)
+
+  print("Encryption Operations:")
+  benchmark_op("encrypt_64_bytes", function()
+    chacha20.encrypt(key, nonce, plaintext_64, 1)
+  end, 1000)
+
+  benchmark_op("encrypt_1k", function()
+    chacha20.encrypt(key, nonce, plaintext_1k, 1)
+  end, 200)
+
+  benchmark_op("encrypt_8k", function()
+    chacha20.encrypt(key, nonce, plaintext_8k, 1)
+  end, 50)
+
+  print("\n" .. string.rep("=", 61))
 end
 
 return chacha20

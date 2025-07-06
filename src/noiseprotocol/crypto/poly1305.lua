@@ -4,6 +4,7 @@
 local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bytes = utils.bytes
+local benchmark_op = utils.benchmark.benchmark_op
 
 local poly1305 = {}
 
@@ -38,7 +39,7 @@ local function reduce_high_order_terms(prod, start_pos, end_pos)
       local bit_offset = excess_bits % 8
 
       if bit_offset > 0 then
-        reduction_multiplier = math.floor(reduction_multiplier * math.pow(2, bit_offset))
+        reduction_multiplier = bit32.lshift(reduction_multiplier, bit_offset)
       end
 
       -- Add reduced value to target position
@@ -297,16 +298,16 @@ function poly1305.authenticate(key, msg)
     h[i] = (h[i] * (1 - use_g)) + (g[i] * use_g)
   end
 
-  -- Add s and create final 16-byte result
-  local result = ""
+  -- Add s and create final 16-byte result (optimized with table)
+  local result_bytes = {}
   carry = 0
   for i = 1, 16 do
     local sum = h[i] + s[i] + carry
-    result = result .. string.char(sum % 256)
+    result_bytes[i] = string.char(sum % 256)
     carry = math.floor(sum / 256)
   end
 
-  return result
+  return table.concat(result_bytes)
 end
 
 --- Test vectors from RFC 8439, RFC 7539, and other reference implementations
@@ -504,6 +505,37 @@ function poly1305.selftest()
   local functional_passed = functional_tests()
 
   return vectors_passed and functional_passed
+end
+
+--- Run performance benchmarks
+---
+--- This function runs comprehensive performance benchmarks for Poly1305 operations
+--- including MAC computation for various message sizes.
+function poly1305.benchmark()
+  print("Poly1305 Performance Benchmark")
+  print("=" .. string.rep("=", 60))
+  print()
+
+  -- Test data
+  local key = bytes.from_hex("85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b")
+  local message_64 = string.rep("a", 64)
+  local message_1k = string.rep("a", 1024)
+  local message_8k = string.rep("a", 8192)
+
+  print("MAC Operations:")
+  benchmark_op("mac_64_bytes", function()
+    poly1305.authenticate(key, message_64)
+  end, 1000)
+
+  benchmark_op("mac_1k", function()
+    poly1305.authenticate(key, message_1k)
+  end, 200)
+
+  benchmark_op("mac_8k", function()
+    poly1305.authenticate(key, message_8k)
+  end, 50)
+
+  print("\n" .. string.rep("=", 61))
 end
 
 return poly1305

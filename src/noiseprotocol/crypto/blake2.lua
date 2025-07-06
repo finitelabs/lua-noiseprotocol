@@ -5,6 +5,7 @@ local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bit64 = utils.bit64
 local bytes = utils.bytes
+local benchmark_op = utils.benchmark.benchmark_op
 
 local blake2 = {}
 
@@ -263,13 +264,13 @@ function blake2.blake2s(data)
     blake2s_compress(h, m, 0, 0, true)
   end
 
-  -- Produce final hash value as binary string
-  local result = ""
+  -- Produce final hash value as binary string (optimized with table)
+  local result_bytes = {}
   for i = 1, 8 do
-    result = result .. bytes.u32_to_le_bytes(h[i])
+    result_bytes[i] = bytes.u32_to_le_bytes(h[i])
   end
 
-  return result
+  return table.concat(result_bytes)
 end
 
 --- Compute BLAKE2b hash of input data
@@ -339,13 +340,13 @@ function blake2.blake2b(data)
     blake2b_compress(h, m, { 0, 0 }, true)
   end
 
-  -- Produce final hash value as binary string
-  local result = ""
+  -- Produce final hash value as binary string (optimized with table)
+  local result_bytes = {}
   for i = 1, 8 do
-    result = result .. bytes.u64_to_le_bytes(h[i])
+    result_bytes[i] = bytes.u64_to_le_bytes(h[i])
   end
 
-  return result
+  return table.concat(result_bytes)
 end
 
 --- Compute BLAKE2s hash and return as hex string
@@ -382,14 +383,16 @@ function blake2.hmac_blake2s(key, data)
     key = key .. string.rep("\0", block_size - #key)
   end
 
-  -- Compute inner and outer padding
-  local ipad = ""
-  local opad = ""
+  -- Compute inner and outer padding (optimized with table)
+  local ipad_bytes = {}
+  local opad_bytes = {}
   for i = 1, block_size do
     local byte = string.byte(key, i)
-    ipad = ipad .. string.char(bit32.bxor(byte, 0x36))
-    opad = opad .. string.char(bit32.bxor(byte, 0x5C))
+    ipad_bytes[i] = string.char(bit32.bxor(byte, 0x36))
+    opad_bytes[i] = string.char(bit32.bxor(byte, 0x5C))
   end
+  local ipad = table.concat(ipad_bytes)
+  local opad = table.concat(opad_bytes)
 
   -- Compute HMAC = H(opad || H(ipad || data))
   local inner_hash = blake2.blake2s(ipad .. data)
@@ -416,14 +419,16 @@ function blake2.hmac_blake2b(key, data)
     key = key .. string.rep("\0", block_size - #key)
   end
 
-  -- Compute inner and outer padding
-  local ipad = ""
-  local opad = ""
+  -- Compute inner and outer padding (optimized with table)
+  local ipad_bytes = {}
+  local opad_bytes = {}
   for i = 1, block_size do
     local byte = string.byte(key, i)
-    ipad = ipad .. string.char(bit32.bxor(byte, 0x36))
-    opad = opad .. string.char(bit32.bxor(byte, 0x5C))
+    ipad_bytes[i] = string.char(bit32.bxor(byte, 0x36))
+    opad_bytes[i] = string.char(bit32.bxor(byte, 0x5C))
   end
+  local ipad = table.concat(ipad_bytes)
+  local opad = table.concat(opad_bytes)
 
   -- Compute HMAC = H(opad || H(ipad || data))
   local inner_hash = blake2.blake2b(ipad .. data)
@@ -702,6 +707,59 @@ function blake2.selftest()
   print("\nFunctional tests result: 4/4 tests passed")
 
   return true
+end
+
+--- Run performance benchmarks
+---
+--- This function runs comprehensive performance benchmarks for BLAKE2 operations
+--- including BLAKE2s and BLAKE2b hash computation for various message sizes.
+function blake2.benchmark()
+  print("BLAKE2 Performance Benchmark")
+  print("=" .. string.rep("=", 60))
+  print()
+
+  -- Test data
+  local message_64 = string.rep("a", 64)
+  local message_1k = string.rep("a", 1024)
+  local message_8k = string.rep("a", 8192)
+  local hmac_key = "benchmark_key"
+
+  print("BLAKE2s Hash Operations:")
+  benchmark_op("blake2s_64_bytes", function()
+    blake2.blake2s(message_64)
+  end, 1000)
+
+  benchmark_op("blake2s_1k", function()
+    blake2.blake2s(message_1k)
+  end, 200)
+
+  benchmark_op("blake2s_8k", function()
+    blake2.blake2s(message_8k)
+  end, 50)
+
+  print("\nBLAKE2b Hash Operations:")
+  benchmark_op("blake2b_64_bytes", function()
+    blake2.blake2b(message_64)
+  end, 500)
+
+  benchmark_op("blake2b_1k", function()
+    blake2.blake2b(message_1k)
+  end, 100)
+
+  benchmark_op("blake2b_8k", function()
+    blake2.blake2b(message_8k)
+  end, 25)
+
+  print("\nBLAKE2s HMAC Operations:")
+  benchmark_op("hmac_blake2s_64_bytes", function()
+    blake2.hmac_blake2s(hmac_key, message_64)
+  end, 500)
+
+  benchmark_op("hmac_blake2s_1k", function()
+    blake2.hmac_blake2s(hmac_key, message_1k)
+  end, 100)
+
+  print("\n" .. string.rep("=", 61))
 end
 
 return blake2

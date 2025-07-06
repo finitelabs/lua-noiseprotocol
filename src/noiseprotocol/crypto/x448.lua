@@ -11,8 +11,15 @@
 --- - Key generation and Diffie-Hellman operations
 
 local utils = require("noiseprotocol.utils")
-local bit32 = utils.bit32
 local bytes = utils.bytes
+local benchmark_op = utils.benchmark.benchmark_op
+local band = utils.bit32.band
+local bor = utils.bit32.bor
+local bxor = utils.bit32.bxor
+local rshift = utils.bit32.rshift
+local floor = math.floor
+local char = string.char
+local byte = string.byte
 
 local x448 = {}
 
@@ -59,8 +66,8 @@ local function fe_reduce(a)
   local carry = 0
   for i = 1, NUM_LIMBS do
     carry = carry + (a[i] or 0)
-    a[i] = bit32.band(carry, LIMB_MASK)
-    carry = math.floor(carry / 256)
+    a[i] = band(carry, LIMB_MASK)
+    carry = floor(carry / 256)
   end
 
   -- Handle overflow: 2^448 ≡ 2^224 + 1 (mod p)
@@ -72,8 +79,8 @@ local function fe_reduce(a)
     local new_carry = 0
     for i = 1, NUM_LIMBS do
       new_carry = new_carry + a[i]
-      a[i] = bit32.band(new_carry, LIMB_MASK)
-      new_carry = math.floor(new_carry / 256)
+      a[i] = band(new_carry, LIMB_MASK)
+      new_carry = floor(new_carry / 256)
     end
     carry = new_carry
   end
@@ -117,18 +124,18 @@ local function fe_sub(a, b)
     local carry = 0
     for i = 1, 28 do
       local sum = r[i] + 0xFF + carry
-      r[i] = bit32.band(sum, LIMB_MASK)
-      carry = math.floor(sum / 256)
+      r[i] = band(sum, LIMB_MASK)
+      carry = floor(sum / 256)
     end
 
     local sum = r[29] + 0xFE + carry
-    r[29] = bit32.band(sum, LIMB_MASK)
-    carry = math.floor(sum / 256)
+    r[29] = band(sum, LIMB_MASK)
+    carry = floor(sum / 256)
 
     for i = 30, NUM_LIMBS do
       sum = r[i] + 0xFF + carry
-      r[i] = bit32.band(sum, LIMB_MASK)
-      carry = math.floor(sum / 256)
+      r[i] = band(sum, LIMB_MASK)
+      carry = floor(sum / 256)
     end
   end
 
@@ -141,104 +148,88 @@ end
 --- @param b table Second operand
 --- @return table r Result
 local function fe_mul(a, b)
-  -- Schoolbook multiplication with carry propagation
+  -- Pre-allocate result array with zeros
   local r = {}
   for i = 1, 2 * NUM_LIMBS do
     r[i] = 0
   end
 
-  -- Multiply and accumulate with periodic carry propagation
+  -- Schoolbook multiplication without intermediate carry propagation
+  -- This is safe because each limb product is at most 255*255 = 65025
+  -- and we can accumulate up to ~56 of these before overflow
   for i = 1, NUM_LIMBS do
-    -- Propagate carries every few iterations to prevent overflow
-    if i % 8 == 1 and i > 1 then
-      local carry = 0
-      for k = 1, i + NUM_LIMBS - 1 do
-        carry = carry + (r[k] or 0)
-        r[k] = bit32.band(carry, LIMB_MASK)
-        carry = math.floor(carry / 256)
+    local ai = a[i]
+    if ai and ai > 0 then -- Skip zero multiplications
+      for j = 1, NUM_LIMBS do
+        local bj = b[j]
+        if bj and bj > 0 then
+          r[i + j - 1] = r[i + j - 1] + ai * bj
+        end
       end
-      if carry > 0 then
-        r[i + NUM_LIMBS] = (r[i + NUM_LIMBS] or 0) + carry
-      end
-    end
-
-    for j = 1, NUM_LIMBS do
-      r[i + j - 1] = r[i + j - 1] + (a[i] or 0) * (b[j] or 0)
     end
   end
 
-  -- Final carry propagation
+  -- Single carry propagation pass
   local carry = 0
   for i = 1, 2 * NUM_LIMBS do
-    carry = carry + (r[i] or 0)
-    r[i] = bit32.band(carry, LIMB_MASK)
-    carry = math.floor(carry / 256)
+    local sum = r[i] + carry
+    r[i] = band(sum, LIMB_MASK)
+    carry = floor(sum / 256)
   end
 
-  -- Reduce modulo p
-  while carry > 0 do
-    r[1] = (r[1] or 0) + carry
-    r[29] = (r[29] or 0) + carry
-    carry = 0
-
-    for i = 1, NUM_LIMBS do
-      carry = carry + (r[i] or 0)
-      r[i] = bit32.band(carry, LIMB_MASK)
-      carry = math.floor(carry / 256)
-    end
-  end
-
-  -- Handle coefficients from NUM_LIMBS+1 to 2*NUM_LIMBS
+  -- Fast reduction using the special form of p = 2^448 - 2^224 - 1
+  -- For each limb i >= 56, we have:
+  -- 2^(8i) ≡ 2^(8(i-56)) + 2^(8(i-56)+224) (mod p)
   for i = NUM_LIMBS + 1, 2 * NUM_LIMBS do
-    if r[i] and r[i] > 0 then
-      local c = r[i]
+    local c = r[i]
+    if c > 0 then
       r[i] = 0
+      local pos1 = i - NUM_LIMBS
+      local pos2 = pos1 + 28 -- 224/8 = 28
 
-      r[i - NUM_LIMBS] = r[i - NUM_LIMBS] + c
-
-      if i - NUM_LIMBS + 28 <= NUM_LIMBS then
-        r[i - NUM_LIMBS + 28] = r[i - NUM_LIMBS + 28] + c
+      r[pos1] = r[pos1] + c
+      if pos2 <= NUM_LIMBS then
+        r[pos2] = r[pos2] + c
       else
-        local extra_pos = i - NUM_LIMBS + 28 - NUM_LIMBS
-        r[extra_pos] = r[extra_pos] + c
-        r[extra_pos + 28] = r[extra_pos + 28] + c
+        -- Handle wraparound
+        local wrap_pos = pos2 - NUM_LIMBS
+        r[wrap_pos] = r[wrap_pos] + c
+        r[wrap_pos + 28] = r[wrap_pos + 28] + c
       end
     end
   end
 
-  fe_reduce(r)
-
-  -- Final check: if we have the pattern that represents p-1, convert to canonical 1
-  -- Pattern: limbs 29-56 = 255, limbs 1-28 = 0
-  local looks_like_p_minus_1 = true
-  for i = 1, 28 do
-    if (r[i] or 0) ~= 0 then
-      looks_like_p_minus_1 = false
-      break
-    end
+  -- Handle remaining carry from reduction
+  if carry > 0 then
+    r[1] = r[1] + carry
+    r[29] = r[29] + carry
   end
-  if looks_like_p_minus_1 then
-    for i = 29, NUM_LIMBS do
-      if (r[i] or 0) ~= 255 then
-        looks_like_p_minus_1 = false
-        break
-      end
-    end
-    if looks_like_p_minus_1 then
-      -- This represents p-1 ≡ -1, but in the context of a*a^(-1),
-      -- we actually want the canonical representation of 1
-      -- So convert this special case to 1
-      for i = 1, NUM_LIMBS do
-        r[i] = 0
-      end
-      r[1] = 1
+
+  -- Final carry propagation and normalization
+  carry = 0
+  for i = 1, NUM_LIMBS do
+    local sum = r[i] + carry
+    r[i] = band(sum, LIMB_MASK)
+    carry = floor(sum / 256)
+  end
+
+  -- Handle final carry
+  while carry > 0 do
+    r[1] = r[1] + carry
+    r[29] = r[29] + carry
+
+    carry = 0
+    for i = 1, NUM_LIMBS do
+      local sum = r[i] + carry
+      r[i] = band(sum, LIMB_MASK)
+      carry = floor(sum / 256)
     end
   end
 
   -- Ensure we only have NUM_LIMBS limbs
   local result = {}
   for i = 1, NUM_LIMBS do
-    result[i] = r[i] or 0
+    result[i] = r[i]
   end
 
   return result
@@ -280,20 +271,27 @@ local function fe_inv(a)
   -- Process MSB (bit 447) = 1
   result = fe_mul(result, base)
 
-  -- Process bits 446 down to 225 (222 ones)
-  for _ = 1, 222 do
+  -- Pre-compute small powers for sliding window
+  local powers = {}
+  powers[1] = fe_copy(base)
+  powers[2] = fe_sq(base)
+  powers[3] = fe_mul(powers[2], base)
+
+  -- Process bits 446 down to 225 (222 ones) using 2-bit sliding window
+  for _ = 1, 111 do
     result = fe_sq(result)
-    result = fe_mul(result, base)
+    result = fe_sq(result)
+    result = fe_mul(result, powers[3]) -- Multiply by a^3
   end
 
   -- Process bit 224 = 0
   result = fe_sq(result)
-  -- Don't multiply since bit is 0
 
-  -- Process bits 223 down to 2 (222 ones)
-  for _ = 1, 222 do
+  -- Process bits 223 down to 2 (222 ones) using 2-bit sliding window
+  for _ = 1, 111 do
     result = fe_sq(result)
-    result = fe_mul(result, base)
+    result = fe_sq(result)
+    result = fe_mul(result, powers[3]) -- Multiply by a^3
   end
 
   -- Process bit 1 = 0
@@ -338,7 +336,7 @@ local function fe_frombytes(b)
   local r = fe_zero()
   -- With 8-bit limbs, it's a direct 1-to-1 mapping
   for i = 1, NUM_LIMBS do
-    r[i] = string.byte(b, i) or 0
+    r[i] = byte(b, i) or 0
   end
   return r
 end
@@ -354,13 +352,13 @@ local function fe_tobytes(a)
   -- Convert to bytes - with 8-bit limbs it's direct
   local b = {}
   for i = 1, NUM_LIMBS do
-    b[i] = string.char(bit32.band(t[i] or 0, 0xFF))
+    b[i] = char(band(t[i] or 0, 0xFF))
   end
 
   return table.concat(b)
 end
 
---- X448 scalar multiplication (working implementation from x448_hybrid)
+--- X448 scalar multiplication
 --- @param scalar string 56-byte scalar
 --- @param base string 56-byte base point
 --- @return string result 56-byte result
@@ -371,10 +369,10 @@ local function x448_scalarmult(scalar, base)
   -- Scalar clamping as per RFC 7748 for X448
   local k = {}
   for i = 1, 56 do
-    k[i] = string.byte(scalar, i) or 0
+    k[i] = byte(scalar, i) or 0
   end
-  k[1] = bit32.band(k[1], 252) -- Clear low 2 bits
-  k[56] = bit32.bor(k[56], 128) -- Set high bit
+  k[1] = band(k[1], 252) -- Clear low 2 bits
+  k[56] = bor(k[56], 128) -- Set high bit
 
   -- Initialize Montgomery ladder
   local x_1 = fe_copy(u)
@@ -386,12 +384,12 @@ local function x448_scalarmult(scalar, base)
 
   -- Montgomery ladder
   for t = 447, 0, -1 do
-    local byte_idx = bit32.rshift(t, 3) + 1 -- t // 8 + 1
-    local bit_idx = bit32.band(t, 7) -- t % 8
-    local kt = bit32.band(bit32.rshift(k[byte_idx], bit_idx), 1)
+    local byte_idx = rshift(t, 3) + 1 -- t // 8 + 1
+    local bit_idx = band(t, 7) -- t % 8
+    local kt = band(rshift(k[byte_idx], bit_idx), 1)
 
     -- Conditional swap
-    swap = bit32.bxor(swap, kt)
+    swap = bxor(swap, kt)
     x_2, x_3 = cswap(swap, x_2, x_3)
     z_2, z_3 = cswap(swap, z_2, z_3)
     swap = kt
@@ -413,8 +411,8 @@ local function x448_scalarmult(scalar, base)
 
     -- z_2 = e * (aa + a24 * e)
     local a24_limbs = fe_zero()
-    a24_limbs[1] = bit32.band(A24, 0xFF)
-    a24_limbs[2] = bit32.band(bit32.rshift(A24, 8), 0xFF)
+    a24_limbs[1] = band(A24, 0xFF)
+    a24_limbs[2] = band(rshift(A24, 8), 0xFF)
 
     local a24_e = fe_mul(a24_limbs, e)
     z_2 = fe_mul(e, fe_add(aa, a24_e))
@@ -444,7 +442,7 @@ function x448.generate_private_key()
   math.randomseed(seed)
 
   for _ = 1, 56 do
-    key = key .. string.char(math.random(0, 255))
+    key = key .. char(math.random(0, 255))
   end
 
   return key
@@ -457,7 +455,7 @@ function x448.derive_public_key(private_key)
   assert(#private_key == 56, "Private key must be exactly 56 bytes")
 
   -- Base point for X448 (u = 5)
-  local base = string.char(5) .. string.rep(string.char(0), 55)
+  local base = char(5) .. string.rep(char(0), 55)
 
   return x448_scalarmult(private_key, base)
 end
@@ -628,7 +626,7 @@ function x448.selftest()
     ok = pcall(function()
       -- Test with all-zero public key
       local private_key = x448.generate_private_key()
-      local zero_public = string.rep(string.char(0), 56)
+      local zero_public = string.rep(char(0), 56)
       local shared = x448.diffie_hellman(private_key, zero_public)
       assert(#shared == 56, "Should handle zero public key")
     end)
@@ -652,5 +650,40 @@ end
 
 -- Store private key counter for better randomness
 x448._key_counter = 0
+
+--- Run performance benchmarks
+---
+--- This function runs comprehensive performance benchmarks for X448 operations
+--- including key generation, public key derivation, and Diffie-Hellman operations.
+function x448.benchmark()
+  print("X448 Performance Benchmark")
+  print("=" .. string.rep("=", 60))
+  print()
+
+  -- Test data from RFC 7748
+  local test_scalar = bytes.from_hex(
+    "3d262fddf9ec8e88495266fea19a34d28882acef045104d0d1aae121"
+      .. "700a779c984c24f8cdd78fbff44943eba368f54b29259a4f1c600ad3"
+  )
+  local test_point = bytes.from_hex(
+    "06fce640fa3487bfda5f6cf2d5263f8aad88334cbd07437f020f08f9"
+      .. "814dc031ddbdc38c19c6da2583fa5429db94ada18aa7a7fb4ef8a086"
+  )
+
+  print("Key Operations:")
+  benchmark_op("generate_keypair", function()
+    x448.generate_keypair()
+  end, 5)
+
+  benchmark_op("derive_public_key", function()
+    x448.derive_public_key(test_scalar)
+  end, 10)
+
+  benchmark_op("diffie_hellman", function()
+    x448.diffie_hellman(test_scalar, test_point)
+  end, 10)
+
+  print("\n" .. string.rep("=", 61))
+end
 
 return x448
