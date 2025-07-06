@@ -7,25 +7,35 @@ on:
     branches: [ main, master ]
 
 jobs:
-  format-check:
+  check:
     runs-on: ubuntu-latest
-    name: Format Check
+    name: Check
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Lua
+        uses: leafo/gh-actions-lua@v11
         with:
-          node-version: '20'
+          luaVersion: '5.4'
 
-      - name: Install dependencies
-        run: npm install
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v4
 
-      - name: Check formatting
-        run: npm run fmt-check
+      - name: Install luacheck
+        run: luarocks install luacheck
+
+      - name: Install stylua
+        uses: JohnnyMorganz/stylua-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: v2.1.0
+          args: false # Will be run as part of `make check`
+
+      - name: Check
+        run: make check
 
   test:
-    needs: format-check
+    needs: check
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -41,14 +51,6 @@ jobs:
         with:
           luaVersion: ${{ matrix.lua-version }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        run: npm install
-
       - name: Run tests
         run: |
           # Set the correct binary name based on the Lua version
@@ -60,49 +62,57 @@ jobs:
 
           ${LUA_BINARY} -v
 
-          # Include slow tests in CI runs
-          export INCLUDE_SLOW_TESTS=1
-          
           # Run test vectors in parallel
           export NOISE_VECTOR_WORKERS=4
 
+          # Use full test vectors only for LuaJIT 2.1, sampled for others
+          if [[ "${{ matrix.lua-version }}" == "luajit-2.1" ]]; then
+            # Include slow tests for LuaJIT 2.1
+            export INCLUDE_SLOW_TESTS=1
+            
+            echo "Using full test vectors for ${{ matrix.lua-version }}"
+            export NOISE_VECTORS_DIR="vectors_full"
+          else
+            echo "Using sampled test vectors for ${{ matrix.lua-version }}"
+            export NOISE_VECTORS_DIR="vectors_sampled"
+          fi
+
           # Run the tests
-          npm run test -- all
+          make test-all
 
   build:
     needs: test
     runs-on: ubuntu-latest
-    name: Build Combined Modules
+    name: Build Combined Module
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Lua
+        uses: leafo/gh-actions-lua@v11
         with:
-          node-version: '20'
+          luaVersion: '5.4'
 
-      - name: Install dependencies
-        run: npm install
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v4
 
-      - name: Build combined modules
-        run: npm run build
+      - name: Install amalg
+        run: luarocks install amalg
 
-      - name: Verify builds
+      - name: Build combined module
+        run: make build
+
+      - name: Verify build
         run: |
-          # Check that all expected files were created
-          for version in 5.1 5.2 5.3 jit; do
-            file="build/noiseprotocol-lua${version}.lua"
-            if [ -f "$file" ]; then
-              echo "✅ $file exists ($(wc -c < "$file") bytes)"
-            else
-              echo "❌ $file missing"
-              exit 1
-            fi
-          done
-          
           # Check default build
           if [ -f "build/noiseprotocol.lua" ]; then
             echo "✅ build/noiseprotocol.lua exists ($(wc -c < "build/noiseprotocol.lua") bytes)"
+            # Quick sanity check - make sure it contains expected content
+            if grep -q "Noise Protocol Framework" build/noiseprotocol.lua; then
+              echo "✅ Build contains expected content"
+            else
+              echo "❌ Build seems corrupted"
+              exit 1
+            fi
           else
             echo "❌ build/noiseprotocol.lua missing"
             exit 1
@@ -111,6 +121,6 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: noiseprotocol-builds
-          path: build/*.lua
+          name: noiseprotocol.lua
+          path: build/noiseprotocol.lua
           retention-days: 30

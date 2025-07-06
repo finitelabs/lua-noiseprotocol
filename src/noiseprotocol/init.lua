@@ -71,7 +71,7 @@ local function parse_psk_modifiers(modifiers)
     if psk_num then
       table.insert(psk_positions, tonumber(psk_num))
     elseif modifier == "fallback" then
-      -- Handle fallback modifier if needed
+      error("Fallback modifier not yet supported")
     else
       error("Unknown modifier: " .. modifier)
     end
@@ -663,7 +663,16 @@ end
 local HandshakeState = {}
 HandshakeState.__index = HandshakeState
 
+--- @class PatternPreMessages
+--- @field initiator? MessageToken[] Pre-messages for initiator
+--- @field responder? MessageToken[] Pre-messages for responder
+
+--- @class PatternDefinition
+--- @field pre_messages PatternPreMessages Pre-messages for initiator and responder
+--- @field messages MessageToken[][] List of message sequences for the pattern
+
 --- Handshake patterns
+--- @type table<NoisePattern, PatternDefinition>
 local PATTERNS = {
   -- No authentication patterns
   [NoisePattern.NN] = {
@@ -2163,17 +2172,19 @@ function noise.selftest()
   return functional_passed
 end
 
--- Export cipher suite components organized by type
+--- @type table<string, DHFunction>
 noise.DH = {
   [DH_25519.name] = DH_25519,
   [DH_448.name] = DH_448,
 }
 
+--- @type table<string, CipherFunction>
 noise.Cipher = {
   [CIPHER_ChaChaPoly.name] = CIPHER_ChaChaPoly,
   [CIPHER_AESGCM.name] = CIPHER_AESGCM,
 }
 
+--- @type table<string, HashFunction>
 noise.Hash = {
   [HASH_SHA256.name] = HASH_SHA256,
   [HASH_SHA512.name] = HASH_SHA512,

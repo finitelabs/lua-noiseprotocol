@@ -161,7 +161,13 @@ function bit32.selftest()
   local passed = 0
   local total = 0
 
-  -- Test vectors for 32-bit operations
+  --- @class B32TestVector
+  --- @field name string Test name
+  --- @field fn fun(...): integer Function to test
+  --- @field inputs any Input values
+  --- @field expected integer Expected result
+
+  --- @type B32TestVector[]
   local test_vectors = {
     -- Mask function tests
     {
@@ -417,10 +423,11 @@ function bit32.selftest()
       expected = 0x99999999,
     },
   }
+  ---@diagnostic disable-next-line: access-invisible
+  local unpack_fn = unpack or table.unpack
 
   for _, test in ipairs(test_vectors) do
     total = total + 1
-    local unpack_fn = unpack or table.unpack
     local result = test.fn(unpack_fn(test.inputs))
     if result == test.expected then
       print("  ✅ PASS: " .. test.name)

@@ -12,6 +12,7 @@ local aes_gcm = {}
 -- ============================================================================
 
 -- AES S-box (substitution box)
+--- @type integer[]
 local SBOX = {
   0x63,
   0x7c,
@@ -271,267 +272,8 @@ local SBOX = {
   0x16,
 }
 
--- AES inverse S-box
-local INV_SBOX = {
-  0x52,
-  0x09,
-  0x6a,
-  0xd5,
-  0x30,
-  0x36,
-  0xa5,
-  0x38,
-  0xbf,
-  0x40,
-  0xa3,
-  0x9e,
-  0x81,
-  0xf3,
-  0xd7,
-  0xfb,
-  0x7c,
-  0xe3,
-  0x39,
-  0x82,
-  0x9b,
-  0x2f,
-  0xff,
-  0x87,
-  0x34,
-  0x8e,
-  0x43,
-  0x44,
-  0xc4,
-  0xde,
-  0xe9,
-  0xcb,
-  0x54,
-  0x7b,
-  0x94,
-  0x32,
-  0xa6,
-  0xc2,
-  0x23,
-  0x3d,
-  0xee,
-  0x4c,
-  0x95,
-  0x0b,
-  0x42,
-  0xfa,
-  0xc3,
-  0x4e,
-  0x08,
-  0x2e,
-  0xa1,
-  0x66,
-  0x28,
-  0xd9,
-  0x24,
-  0xb2,
-  0x76,
-  0x5b,
-  0xa2,
-  0x49,
-  0x6d,
-  0x8b,
-  0xd1,
-  0x25,
-  0x72,
-  0xf8,
-  0xf6,
-  0x64,
-  0x86,
-  0x68,
-  0x98,
-  0x16,
-  0xd4,
-  0xa4,
-  0x5c,
-  0xcc,
-  0x5d,
-  0x65,
-  0xb6,
-  0x92,
-  0x6c,
-  0x70,
-  0x48,
-  0x50,
-  0xfd,
-  0xed,
-  0xb9,
-  0xda,
-  0x5e,
-  0x15,
-  0x46,
-  0x57,
-  0xa7,
-  0x8d,
-  0x9d,
-  0x84,
-  0x90,
-  0xd8,
-  0xab,
-  0x00,
-  0x8c,
-  0xbc,
-  0xd3,
-  0x0a,
-  0xf7,
-  0xe4,
-  0x58,
-  0x05,
-  0xb8,
-  0xb3,
-  0x45,
-  0x06,
-  0xd0,
-  0x2c,
-  0x1e,
-  0x8f,
-  0xca,
-  0x3f,
-  0x0f,
-  0x02,
-  0xc1,
-  0xaf,
-  0xbd,
-  0x03,
-  0x01,
-  0x13,
-  0x8a,
-  0x6b,
-  0x3a,
-  0x91,
-  0x11,
-  0x41,
-  0x4f,
-  0x67,
-  0xdc,
-  0xea,
-  0x97,
-  0xf2,
-  0xcf,
-  0xce,
-  0xf0,
-  0xb4,
-  0xe6,
-  0x73,
-  0x96,
-  0xac,
-  0x74,
-  0x22,
-  0xe7,
-  0xad,
-  0x35,
-  0x85,
-  0xe2,
-  0xf9,
-  0x37,
-  0xe8,
-  0x1c,
-  0x75,
-  0xdf,
-  0x6e,
-  0x47,
-  0xf1,
-  0x1a,
-  0x71,
-  0x1d,
-  0x29,
-  0xc5,
-  0x89,
-  0x6f,
-  0xb7,
-  0x62,
-  0x0e,
-  0xaa,
-  0x18,
-  0xbe,
-  0x1b,
-  0xfc,
-  0x56,
-  0x3e,
-  0x4b,
-  0xc6,
-  0xd2,
-  0x79,
-  0x20,
-  0x9a,
-  0xdb,
-  0xc0,
-  0xfe,
-  0x78,
-  0xcd,
-  0x5a,
-  0xf4,
-  0x1f,
-  0xdd,
-  0xa8,
-  0x33,
-  0x88,
-  0x07,
-  0xc7,
-  0x31,
-  0xb1,
-  0x12,
-  0x10,
-  0x59,
-  0x27,
-  0x80,
-  0xec,
-  0x5f,
-  0x60,
-  0x51,
-  0x7f,
-  0xa9,
-  0x19,
-  0xb5,
-  0x4a,
-  0x0d,
-  0x2d,
-  0xe5,
-  0x7a,
-  0x9f,
-  0x93,
-  0xc9,
-  0x9c,
-  0xef,
-  0xa0,
-  0xe0,
-  0x3b,
-  0x4d,
-  0xae,
-  0x2a,
-  0xf5,
-  0xb0,
-  0xc8,
-  0xeb,
-  0xbb,
-  0x3c,
-  0x83,
-  0x53,
-  0x99,
-  0x61,
-  0x17,
-  0x2b,
-  0x04,
-  0x7e,
-  0xba,
-  0x77,
-  0xd6,
-  0x26,
-  0xe1,
-  0x69,
-  0x14,
-  0x63,
-  0x55,
-  0x21,
-  0x0c,
-  0x7d,
-}
-
 -- Round constants (Rcon) for key expansion
+--- @type integer[]
 local RCON = {
   0x01,
   0x02,
@@ -545,10 +287,14 @@ local RCON = {
   0x36,
 }
 
+--- @alias AESGCMWord [integer, integer, integer, integer]
+--- @alias AESGCMBlock [integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer]
+--- @alias AESGCMState [AESGCMWord, AESGCMWord, AESGCMWord, AESGCMWord]
+
 --- XOR two 4-byte words
---- @param a table 4-byte array
---- @param b table 4-byte array
---- @return table result 4-byte array
+--- @param a AESGCMWord 4-byte array
+--- @param b AESGCMWord 4-byte array
+--- @return table Word 4-byte array
 local function xor_words(a, b)
   return {
     bit32.bxor(a[1], b[1]),
@@ -559,22 +305,21 @@ local function xor_words(a, b)
 end
 
 --- Rotate word (circular left shift by 1 byte)
---- @param word table 4-byte array
---- @return table result Rotated 4-byte array
+--- @param word AESGCMWord 4-byte array
+--- @return AESGCMWord result Rotated 4-byte array
 local function rot_word(word)
   return { word[2], word[3], word[4], word[1] }
 end
 
 --- Apply S-box substitution to a word
---- @param word table 4-byte array
---- @return table result Substituted 4-byte array
+--- @param word AESGCMWord 4-byte array
+--- @return AESGCMWord result Substituted 4-byte array
 local function sub_word(word)
-  return {
-    SBOX[word[1] + 1],
-    SBOX[word[2] + 1],
-    SBOX[word[3] + 1],
-    SBOX[word[4] + 1],
-  }
+  local s_1 = assert(SBOX[word[1] + 1], "Invalid SBOX index " .. (word[1] + 1))
+  local s_2 = assert(SBOX[word[2] + 1], "Invalid SBOX index " .. (word[2] + 1))
+  local s_3 = assert(SBOX[word[3] + 1], "Invalid SBOX index " .. (word[3] + 1))
+  local s_4 = assert(SBOX[word[4] + 1], "Invalid SBOX index " .. (word[4] + 1))
+  return { s_1, s_2, s_3, s_4 }
 end
 
 --- AES key expansion
@@ -600,6 +345,7 @@ local function key_expansion(key)
   end
 
   -- Convert key to words
+  --- @type AESGCMWord
   local w = {}
   for i = 0, nk - 1 do
     w[i] = {
@@ -614,7 +360,8 @@ local function key_expansion(key)
   for i = nk, 4 * (nr + 1) - 1 do
     local temp = w[i - 1]
     if i % nk == 0 then
-      temp = xor_words(sub_word(rot_word(temp)), { RCON[i / nk], 0, 0, 0 })
+      local t = assert(RCON[i / nk], "Invalid RCON index " .. (i / nk))
+      temp = xor_words(sub_word(rot_word(temp)), { t, 0, 0, 0 })
     elseif nk > 6 and i % nk == 4 then
       temp = sub_word(temp)
     end
@@ -624,31 +371,13 @@ local function key_expansion(key)
   return w, nr
 end
 
---- Galois field multiplication in GF(2^8)
---- @param a integer First operand
---- @param b integer Second operand
---- @return integer result Product in GF(2^8)
-local function gf_mul(a, b)
-  local p = 0
-  for _ = 0, 7 do
-    if bit32.band(b, 1) ~= 0 then
-      p = bit32.bxor(p, a)
-    end
-    local hi_bit_set = bit32.band(a, 0x80) ~= 0
-    a = bit32.band(bit32.lshift(a, 1), 0xFF)
-    if hi_bit_set then
-      a = bit32.bxor(a, 0x1B) -- x^8 + x^4 + x^3 + x + 1
-    end
-    b = bit32.rshift(b, 1)
-  end
-  return p
-end
-
 --- MixColumns transformation
---- @param state table 4x4 state matrix
+--- @param state AESGCMState 4x4 state matrix
 local function mix_columns(state)
   for c = 0, 3 do
+    --- @type AESGCMWord
     local a = {}
+    --- @type AESGCMWord
     local b = {}
     for i = 0, 3 do
       a[i] = state[i][c]
@@ -664,17 +393,18 @@ local function mix_columns(state)
 end
 
 --- SubBytes transformation
---- @param state table 4x4 state matrix
+--- @param state AESGCMState 4x4 state matrix
 local function sub_bytes(state)
   for i = 0, 3 do
     for j = 0, 3 do
-      state[i][j] = SBOX[state[i][j] + 1]
+      local s_index = state[i][j] + 1
+      state[i][j] = assert(SBOX[s_index], "Invalid SBOX index " .. s_index)
     end
   end
 end
 
 --- ShiftRows transformation
---- @param state table 4x4 state matrix
+--- @param state AESGCMState 4x4 state matrix
 local function shift_rows(state)
   -- Row 0: no shift
   -- Row 1: shift left by 1
@@ -701,7 +431,7 @@ local function shift_rows(state)
 end
 
 --- AddRoundKey transformation
---- @param state table 4x4 state matrix
+--- @param state AESGCMState 4x4 state matrix
 --- @param round_key table Round key words
 --- @param round integer Round number
 local function add_round_key(state, round_key, round)
@@ -720,8 +450,10 @@ end
 --- @return string ciphertext 16-byte encrypted block
 local function aes_encrypt_block(input, expanded_key, nr)
   -- Initialize state from input
+  --- @type AESGCMState
   local state = {}
   for i = 0, 3 do
+    --- @type AESGCMWord
     state[i] = {}
     for j = 0, 3 do
       state[i][j] = string.byte(input, j * 4 + i + 1)
@@ -765,7 +497,9 @@ end
 --- @return string result Product in GF(2^128)
 local function gcm_multiply(x, y)
   -- Convert to bit arrays for easier manipulation
+  --- @type AESGCMBlock
   local z = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+  --- @type AESGCMBlock
   local v = {}
   for i = 1, 16 do
     v[i] = string.byte(y, i)
