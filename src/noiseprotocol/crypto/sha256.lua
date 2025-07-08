@@ -1,6 +1,7 @@
 --- @module "noiseprotocol.crypto.sha256"
 --- Pure Lua SHA-256 Implementation for portability.
 
+local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bytes = utils.bytes
@@ -155,6 +156,13 @@ end
 --- @param data string Input data to hash
 --- @return string hash 32-byte binary hash
 function sha256.sha256(data)
+  -- Check if we should use OpenSSL
+  local openssl = openssl_wrapper.get()
+  if openssl then
+    return openssl.digest.digest("sha256", data, true)
+  end
+
+  -- Native implementation
   -- Initialize hash values
   --- @type HashState
   local H = { H0[1], H0[2], H0[3], H0[4], H0[5], H0[6], H0[7], H0[8] }
@@ -207,6 +215,13 @@ end
 --- @param data string Data to authenticate
 --- @return string hmac 32-byte HMAC value
 function sha256.hmac_sha256(key, data)
+  -- Check if we should use OpenSSL
+  local openssl = openssl_wrapper.get()
+  if openssl then
+    return openssl.hmac.hmac("sha256", data, key, true)
+  end
+
+  -- Native implementation
   local block_size = 64 -- SHA-256 block size
 
   -- Keys longer than blocksize are shortened by hashing them
@@ -430,10 +445,6 @@ end
 --- This function runs comprehensive performance benchmarks for SHA-256 operations
 --- including hash computation and HMAC for various message sizes.
 function sha256.benchmark()
-  print("SHA-256 Performance Benchmark")
-  print("=" .. string.rep("=", 60))
-  print()
-
   -- Test data
   local message_64 = string.rep("a", 64)
   local message_1k = string.rep("a", 1024)
@@ -465,8 +476,6 @@ function sha256.benchmark()
   benchmark_op("hmac_8k", function()
     sha256.hmac_sha256(hmac_key, message_8k)
   end, 25)
-
-  print("\n" .. string.rep("=", 61))
 end
 
 return sha256

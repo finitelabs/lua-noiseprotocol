@@ -1,90 +1,88 @@
 #!/bin/bash
 
-# Lua Crypto Library Benchmark Runner
+# Noise Protocol Library Benchmark Runner
 # Runs performance benchmarks for crypto modules
 #
 # Usage: ./run_benchmarks.sh [module_names...]
 #
 # Examples:
-#   ./run_benchmarks.sh                    # Run all benchmarks
+#   ./run_benchmarks.sh                   # Run all benchmarks
 #   ./run_benchmarks.sh x448 x25519       # Run only x448 and x25519 benchmarks
 #
-# Available modules: x448 (more to be added)
+# Available modules: aes_gcm, blake2, chacha20, chacha20_poly1305, poly1305, sha256, sha512, x448, x25519
 
 set -e  # Exit on any error
 
-echo "⚡ Lua Crypto Library - Benchmark Runner"
-echo "========================================"
+echo "============================================="
+echo "⚡ Noise Protocol Library - Benchmark Runner"
+echo "============================================="
 echo
 
 # Colors for output
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+green='\033[0;32m'
+red='\033[0;31m'
+blue='\033[0;34m'
+nc='\033[0m' # No Color
 
 # Track overall results
-TOTAL_MODULES=0
-COMPLETED_MODULES=()
-FAILED_MODULES=()
+completed_modules=()
+failed_modules=()
 
-LUA_BINARY="${LUA_BINARY:-luajit}"  # Use luajit by default, can be overridden
+lua_binary="${LUA_BINARY:-luajit}"  # Use luajit by default, can be overridden
 
 # Check if the lua binary is available
-if ! command -v "${LUA_BINARY}" &> /dev/null; then
-    echo -e "${RED}❌ Error: '${LUA_BINARY}' command not found.${NC}"
+if ! command -v "$lua_binary" &> /dev/null; then
+    echo -e "${red}❌ Error: '$lua_binary' command not found.${nc}"
     exit 1
 fi
-echo "Lua version: $(${LUA_BINARY} -v)"
+echo "$($lua_binary -v)"
 echo
 
 # Get script directory
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # Add repository root to Lua's package path
-export LUA_PATH="$SCRIPT_DIR/?.lua;$SCRIPT_DIR/?/init.lua;$SCRIPT_DIR/src/?.lua;$SCRIPT_DIR/src/?/init.lua;$LUA_PATH"
-export SCRIPT_DIR
+lua_path="$script_dir/?.lua;$script_dir/?/init.lua;$script_dir/src/?.lua;$script_dir/src/?/init.lua;$LUA_PATH"
 
 # Parse command line arguments to determine which modules to run
-DEFAULT_MODULES_TO_RUN=("aes_gcm" "blake2" "chacha20" "chacha20_poly1305" "poly1305" "sha256" "sha512" "x448" "x25519")
-ALL_VALID_MODULES=("aes_gcm" "blake2" "chacha20" "chacha20_poly1305" "poly1305" "sha256" "sha512" "x448" "x25519")
-MODULES_TO_RUN=("$@")
+default_modules=("aes_gcm" "blake2" "chacha20" "chacha20_poly1305" "poly1305" "sha256" "sha512" "x448" "x25519")
+all_modules=("aes_gcm" "blake2" "chacha20" "chacha20_poly1305" "poly1305" "sha256" "sha512" "x448" "x25519")
+modules_to_run=("$@")
 
 # Validate modules if specified
-if [ ${#MODULES_TO_RUN[@]} -gt 0 ] && [ "${MODULES_TO_RUN[0]}" != "all" ]; then
-    for module in "${MODULES_TO_RUN[@]}"; do
+if [ ${#modules_to_run[@]} -gt 0 ] && [ "${modules_to_run[0]}" != "all" ]; then
+    for module in "${modules_to_run[@]}"; do
         valid=0
-        for valid_module in "${ALL_VALID_MODULES[@]}"; do
+        for valid_module in "${all_modules[@]}"; do
             if [ "$module" = "$valid_module" ]; then
                 valid=1
                 break
             fi
         done
         if [ $valid -eq 0 ]; then
-            echo -e "${RED}❌ Error: Unknown module '$module' or benchmark not implemented${NC}"
-            echo "Available modules: ${ALL_VALID_MODULES[*]}"
+            echo -e "${red}❌ Error: Unknown module '$module' or benchmark not implemented${nc}"
+            echo "Available modules: ${all_modules[*]}"
             exit 1
         fi
     done
 fi
 
-if [ ${#MODULES_TO_RUN[@]} -eq 0 ]; then
+if [ ${#modules_to_run[@]} -eq 0 ]; then
     # No arguments provided, run all benchmarks
-    MODULES_TO_RUN=("${DEFAULT_MODULES_TO_RUN[@]}")
-    echo "Running default benchmarks: ${MODULES_TO_RUN[*]}"
-elif [ "${MODULES_TO_RUN[0]}" = "all" ]; then
-    MODULES_TO_RUN=("${ALL_VALID_MODULES[@]}")
-    echo "Running all benchmarks: ${MODULES_TO_RUN[*]}"
+    modules_to_run=("${default_modules[@]}")
+    echo "Running default benchmarks: ${modules_to_run[*]}"
+elif [ "${modules_to_run[0]}" = "all" ]; then
+    modules_to_run=("${all_modules[@]}")
+    echo "Running all benchmarks: ${modules_to_run[*]}"
 else
-    echo "Running specified benchmarks: ${MODULES_TO_RUN[*]}"
+    echo "Running specified benchmarks: ${modules_to_run[*]}"
 fi
 echo
 
 # Function to check if a module should be run
 should_run_module() {
     local module_key="$1"
-    for module in "${MODULES_TO_RUN[@]}"; do
+    for module in "${modules_to_run[@]}"; do
         if [ "$module" = "$module_key" ]; then
             return 0
         fi
@@ -102,17 +100,16 @@ run_benchmark() {
         return
     fi
 
-    echo -e "${BLUE}Benchmarking $module_name...${NC}"
-    echo "----------------------------------------"
+    echo "---------------------------------------------"
+    echo -e "${blue}Benchmarking $module_name...${nc}"
+    echo "---------------------------------------------"
 
-    TOTAL_MODULES=$((TOTAL_MODULES + 1))
-
-    if "${LUA_BINARY}" -e "$lua_command" 2>&1; then
-        echo -e "${GREEN}✅ $module_name: BENCHMARK COMPLETED${NC}"
-        COMPLETED_MODULES+=("$module_name")
+    if LUA_PATH="$lua_path" "$lua_binary" -e "$lua_command" 2>&1; then
+        echo -e "\n${green}✅ $module_name: BENCHMARK COMPLETED${nc}"
+        completed_modules+=("$module_name")
     else
-        echo -e "${RED}❌ $module_name: BENCHMARK FAILED${NC}"
-        FAILED_MODULES+=("$module_name")
+        echo -e "\n${red}❌ $module_name: BENCHMARK FAILED${nc}"
+        failed_modules+=("$module_name")
     fi
 
     echo
@@ -122,8 +119,8 @@ run_module_benchmark() {
   local module_name="$1"
   local module_key="$2"
   local lua_module="$3"
-  run_benchmark "${module_name}" "${module_key}" "
-    require('${lua_module}').benchmark()
+  run_benchmark "$module_name" "$module_key" "
+    require('$lua_module').benchmark()
   "
 }
 
@@ -138,29 +135,32 @@ run_module_benchmark "SHA-512 Hash" "sha512" "noiseprotocol.crypto.sha512"
 run_module_benchmark "X25519 Curve25519 ECDH" "x25519" "noiseprotocol.crypto.x25519"
 run_module_benchmark "X448 Curve448 ECDH" "x448" "noiseprotocol.crypto.x448"
 
-# Summary
-echo "========================================="
-echo "📊 BENCHMARK SUMMARY"
-echo "========================================="
+completed_count=${#completed_modules[@]}
+failed_count=${#failed_modules[@]}
+total_count=$((completed_count + failed_count))
 
-if [ ${#FAILED_MODULES[@]} -eq 0 ]; then
-    echo -e "${GREEN}🎉 ALL BENCHMARKS COMPLETED: $TOTAL_MODULES/$TOTAL_MODULES${NC}"
-else
-    echo -e "${RED}⚠️  SOME BENCHMARKS FAILED: ${#FAILED_MODULES[@]}/$TOTAL_MODULES${NC}"
+# If only one module is run, no need to summarize
+if [ $total_count -eq 1 ]; then
+    exit 0
 fi
 
-if [ ${#COMPLETED_MODULES[@]} -gt 0 ]; then
+# Summary
+echo "============================================="
+echo "📊 BENCHMARK SUMMARY"
+echo "============================================="
+
+if [ ${#failed_modules[@]} -eq 0 ]; then
+    echo -e "${green}🎉 ALL BENCHMARKS COMPLETED: $completed_count/$total_count${nc}"
     echo
     echo "Completed benchmarks:"
-    for module in "${COMPLETED_MODULES[@]}"; do
+    for module in "${completed_modules[@]}"; do
         echo "• $module: ✅ COMPLETE"
     done
-fi
-
-if [ ${#FAILED_MODULES[@]} -gt 0 ]; then
+else
+    echo -e "${red}⚠️  SOME BENCHMARKS FAILED: $failed_count/$total_count${nc}"
     echo
     echo "Failed benchmarks:"
-    for module in "${FAILED_MODULES[@]}"; do
+    for module in "${failed_modules[@]}"; do
         echo "• $module: ❌ FAILED"
     done
     exit 1

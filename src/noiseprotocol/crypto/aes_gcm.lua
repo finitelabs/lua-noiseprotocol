@@ -1,6 +1,7 @@
 --- @module "noiseprotocol.crypto.aes_gcm"
 --- AES-GCM Authenticated Encryption with Associated Data (AEAD) Implementation for portability.
 
+local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bytes = utils.bytes
@@ -667,6 +668,30 @@ function aes_gcm.encrypt(key, nonce, plaintext, aad)
 
   aad = aad or ""
 
+  local openssl = openssl_wrapper.get()
+  if openssl then
+    local evp = openssl.cipher.get("aes-" .. #key * 8 .. "-gcm")
+    local e = evp:encrypt_new()
+    e:ctrl(openssl.cipher.EVP_CTRL_GCM_SET_IVLEN, #nonce)
+    e:init(key, nonce)
+
+    -- Indicate that the AAD setting is set
+    local aad_update = e:update(aad, true) or ""
+    if #aad_update > 0 then
+      error("AAD update should not return data in AEAD mode")
+    end
+    local ciphertext = e:update(plaintext)
+    local final = e:final() or ""
+    if #final > 0 then
+      error("Finalization should not return data in AEAD mode")
+    end
+    local tag = e:ctrl(openssl.cipher.EVP_CTRL_GCM_GET_TAG, 16) or ""
+    if #tag ~= 16 then
+      error("Tag length must be exactly 16 bytes in AEAD mode")
+    end
+    return ciphertext .. tag
+  end
+
   -- Expand key
   local expanded_key, nr = key_expansion(key)
 
@@ -718,6 +743,29 @@ function aes_gcm.decrypt(key, nonce, ciphertext_and_tag, aad)
   local ciphertext_len = #ciphertext_and_tag - 16
   local ciphertext = string.sub(ciphertext_and_tag, 1, ciphertext_len)
   local received_tag = string.sub(ciphertext_and_tag, ciphertext_len + 1)
+
+  local openssl = openssl_wrapper.get()
+  if openssl then
+    local evp = openssl.cipher.get("aes-" .. #key * 8 .. "-gcm")
+    local e = evp:decrypt_new()
+    e:ctrl(openssl.cipher.EVP_CTRL_GCM_SET_IVLEN, #nonce)
+    e:ctrl(openssl.cipher.EVP_CTRL_GCM_SET_TAG, received_tag)
+    e:init(key, nonce)
+
+    -- Indicate that the AAD setting is set
+    local aad_update = e:update(aad, true) or ""
+    if #aad_update > 0 then
+      error("AAD update should not return data in AEAD mode")
+    end
+    local plaintext = e:update(ciphertext)
+    local final = e:final()
+    if final == nil then
+      return nil -- Authentication failed
+    elseif #final > 0 then
+      error("Finalization should not return data in AEAD mode")
+    end
+    return plaintext
+  end
 
   -- Expand key
   local expanded_key, nr = key_expansion(key)
@@ -1014,10 +1062,6 @@ end
 --- This function runs comprehensive performance benchmarks for AES-GCM operations
 --- including authenticated encryption and decryption for various message and key sizes.
 function aes_gcm.benchmark()
-  print("AES-GCM Performance Benchmark")
-  print("=" .. string.rep("=", 60))
-  print()
-
   -- Test data
   local key128 = bytes.from_hex("feffe9928665731c6d6a8f9467308308")
   local key256 = bytes.from_hex("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308")
@@ -1065,8 +1109,6 @@ function aes_gcm.benchmark()
   benchmark_op("aes256_decrypt_1k", function()
     aes_gcm.decrypt(key256, nonce, ct256_1k, aad)
   end, 50)
-
-  print("\n" .. string.rep("=", 61))
 end
 
 return aes_gcm

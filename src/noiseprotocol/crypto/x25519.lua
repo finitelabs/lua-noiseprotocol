@@ -449,10 +449,6 @@ end
 --- This function runs comprehensive performance benchmarks for X25519 operations
 --- including key generation, public key derivation, and Diffie-Hellman operations.
 function x25519.benchmark()
-  print("X25519 Performance Benchmark")
-  print("=" .. string.rep("=", 60))
-  print()
-
   -- Test data from RFC 7748
   local test_scalar = bytes.from_hex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4")
   local test_point = bytes.from_hex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c")
@@ -469,8 +465,6 @@ function x25519.benchmark()
   benchmark_op("diffie_hellman", function()
     x25519.diffie_hellman(test_scalar, test_point)
   end, 50)
-
-  print("\n" .. string.rep("=", 61))
 end
 
 return x25519

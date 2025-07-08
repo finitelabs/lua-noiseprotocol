@@ -1,4 +1,5 @@
 --- @module "noiseprotocol.utils"
+--- Common utility functions for the Noise Protocol Framework
 
 return {
   bit32 = require("noiseprotocol.utils.bit32"),

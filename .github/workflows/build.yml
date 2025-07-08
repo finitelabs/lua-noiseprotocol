@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main, master ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -19,7 +23,9 @@ jobs:
           luaVersion: '5.4'
 
       - name: Setup LuaRocks
-        uses: leafo/gh-actions-luarocks@v4
+        uses: leafo/gh-actions-luarocks@v5
+        with:
+          luarocksVersion: "3.12.2"
 
       - name: Install luacheck
         run: luarocks install luacheck
@@ -37,8 +43,9 @@ jobs:
   test:
     needs: check
     runs-on: ubuntu-latest
+    continue-on-error: false
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         lua-version: ['5.1', '5.2', '5.3', '5.4', 'luajit-2.0', 'luajit-2.1']
 
@@ -51,34 +58,48 @@ jobs:
         with:
           luaVersion: ${{ matrix.lua-version }}
 
-      - name: Run tests
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v5
+        with:
+          luarocksVersion: "3.12.2"
+
+      - name: Install lua-opensssl
+        run: luarocks install openssl
+
+      - name: Setup tests
         run: |
           # Set the correct binary name based on the Lua version
           if [[ "${{ matrix.lua-version }}" == luajit* ]]; then
-            export LUA_BINARY=luajit
+            LUA_BINARY=luajit
           else
-            export LUA_BINARY=lua
+            LUA_BINARY=lua
           fi
 
+          echo "LUA_BINARY=$LUA_BINARY" >> "$GITHUB_ENV"
           ${LUA_BINARY} -v
 
           # Run test vectors in parallel
-          export NOISE_VECTOR_WORKERS=4
+          echo "NOISE_VECTOR_WORKERS=$(nproc)" >> "$GITHUB_ENV"
 
           # Use full test vectors only for LuaJIT 2.1, sampled for others
           if [[ "${{ matrix.lua-version }}" == "luajit-2.1" ]]; then
             # Include slow tests for LuaJIT 2.1
-            export INCLUDE_SLOW_TESTS=1
+            echo "INCLUDE_SLOW_TESTS=1" >> "$GITHUB_ENV"
             
             echo "Using full test vectors for ${{ matrix.lua-version }}"
-            export NOISE_VECTORS_DIR="vectors_full"
+            echo "NOISE_VECTORS_DIR=vectors_full" >> "$GITHUB_ENV"
           else
             echo "Using sampled test vectors for ${{ matrix.lua-version }}"
-            export NOISE_VECTORS_DIR="vectors_sampled"
+            echo "NOISE_VECTORS_DIR=vectors_sampled" >> "$GITHUB_ENV"
           fi
 
-          # Run the tests
+      - name: Run tests
+        run: |
           make test-all
+
+      - name: Run tests using OpenSSL
+        run: |
+          NOISE_USE_OPENSSL=1 make test-all
 
   build:
     needs: test
@@ -93,7 +114,9 @@ jobs:
           luaVersion: '5.4'
 
       - name: Setup LuaRocks
-        uses: leafo/gh-actions-luarocks@v4
+        uses: leafo/gh-actions-luarocks@v5
+        with:
+          luarocksVersion: "3.12.2"
 
       - name: Install amalg
         run: luarocks install amalg

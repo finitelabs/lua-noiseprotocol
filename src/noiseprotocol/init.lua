@@ -1,10 +1,35 @@
 --- @module "noiseprotocol"
 --- Noise Protocol Framework Implementation
+---
+--- This module implements the Noise Protocol Framework, providing a secure
+--- channel establishment protocol with support for various handshake patterns,
+--- cipher suites, and optional OpenSSL acceleration.
+---
+--- @usage
+--- local noise = require("noiseprotocol")
+---
+--- -- Enable OpenSSL acceleration (optional)
+--- noise.use_openssl(true)
+---
+--- -- Create a connection
+--- local connection = noise.NoiseConnection:new({
+---   protocol_name = "Noise_XX_25519_ChaChaPoly_SHA256",
+---   initiator = true,
+---   static_key = my_static_key
+--- })
+--- ...
 
 local crypto = require("noiseprotocol.crypto")
 local utils = require("noiseprotocol.utils")
+local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 
-local noise = {}
+local noise = {
+  --- Enable or disable OpenSSL acceleration
+  --- @function use_openssl
+  --- @param use boolean True to enable OpenSSL, false to disable
+  --- @see noiseprotocol.openssl_wrapper.use
+  use_openssl = openssl_wrapper.use,
+}
 
 -- ============================================================================
 -- PROTOCOL NAME PARSING

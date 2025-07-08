@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Lua Crypto Library Test Runner
+# Noise Protocol Library Test Runner
 # Runs all test suites for ChaCha20, Poly1305, and ChaCha20-Poly1305 AEAD
 #
 # Usage: ./run_tests.sh [module_names...]
@@ -14,84 +14,81 @@
 
 set -e  # Exit on any error
 
-echo "🔐 Lua Crypto Library - Test Suite Runner"
-echo "========================================="
+echo "============================================="
+echo "🔐 Noise Protocol Library - Test Suite Runner"
+echo "============================================="
 echo
 
 # Colors for output
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+green='\033[0;32m'
+red='\033[0;31m'
+blue='\033[0;34m'
+nc='\033[0m' # No Color
 
 # Track overall results
-TOTAL_MODULES=0
-PASSED_MODULES=()
-PASSED_COUNT=0
-FAILED_MODULES=()
+passed_modules=()
+failed_modules=()
 
-LUA_BINARY="${LUA_BINARY:-luajit}"  # Use luajit by default, can be overridden
+# Lua binary to use for running tests
+lua_binary="${LUA_BINARY:-lua}"
 
 # Check if the lua binary is available
-if ! command -v "${LUA_BINARY}" &> /dev/null; then
-    echo -e "${RED}❌ Error: '${LUA_BINARY}' command not found.${NC}"
+if ! command -v "$lua_binary" &> /dev/null; then
+    echo -e "${red}❌ Error: $lua_binary command not found.${nc}"
     exit 1
 fi
-echo "Lua version: $(${LUA_BINARY} -v)"
+echo "$($lua_binary -v)"
 echo
 
 # Get script directory
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # Add repository root to Lua's package path
-# This allows require() to find modules in the repository root
-export LUA_PATH="$SCRIPT_DIR/?.lua;$SCRIPT_DIR/?/init.lua;$SCRIPT_DIR/src/?.lua;$SCRIPT_DIR/src/?/init.lua;$LUA_PATH"
-export SCRIPT_DIR
+# This allows require() to find modules in the src/tests directories
+lua_path="$script_dir/?.lua;$script_dir/?/init.lua;$script_dir/src/?.lua;$script_dir/src/?/init.lua;$LUA_PATH"
 
 # Define noise vector files
-NOISE_VECTORS_DIR="${NOISE_VECTORS_DIR:=vectors_sampled}"
-NOISE_VECTOR_FILES=("cacophony.json" "snow.json" "snow_multi_psk.json")
+vectors_dir="${NOISE_VECTORS_DIR:=vectors_sampled}"
+vector_files=("cacophony.json" "snow.json" "snow_multi_psk.json")
 
 # Parse command line arguments to determine which modules to run
-DEFAULT_MODULES_TO_RUN=("utils_bit32" "utils_bit64" "utils_bytes" "poly1305" "chacha20" "chacha20_poly1305" "aes_gcm" "x25519" "x448" "sha256" "sha512" "blake2" "noise")
-ALL_VALID_MODULES=("utils_bit32" "utils_bit64" "utils_bytes" "poly1305" "chacha20" "chacha20_poly1305" "aes_gcm" "x25519" "x448" "sha256" "sha512" "blake2" "noise" "noise_vectors")
-MODULES_TO_RUN=("$@")
+default_modules=("utils_bit32" "utils_bit64" "utils_bytes" "poly1305" "chacha20" "chacha20_poly1305" "aes_gcm" "x25519" "x448" "sha256" "sha512" "blake2" "noise")
+all_modules=("utils_bit32" "utils_bit64" "utils_bytes" "poly1305" "chacha20" "chacha20_poly1305" "aes_gcm" "x25519" "x448" "sha256" "sha512" "blake2" "noise" "noise_vectors")
+modules_to_run=("$@")
 
 # Validate modules if specified
-if [ ${#MODULES_TO_RUN[@]} -gt 0 ] && [ "${MODULES_TO_RUN[0]}" != "all" ]; then
-    for module in "${MODULES_TO_RUN[@]}"; do
+if [ ${#modules_to_run[@]} -gt 0 ] && [ "${modules_to_run[0]}" != "all" ]; then
+    for module in "${modules_to_run[@]}"; do
         valid=0
-        for valid_module in "${ALL_VALID_MODULES[@]}"; do
+        for valid_module in "${all_modules[@]}"; do
             if [ "$module" = "$valid_module" ]; then
                 valid=1
                 break
             fi
         done
         if [ $valid -eq 0 ]; then
-            echo -e "${RED}❌ Error: Unknown module '$module'${NC}"
-            echo "Available modules: ${ALL_VALID_MODULES[*]}"
+            echo -e "${red}❌ Error: Unknown module '$module'${nc}"
+            echo "Available modules: ${all_modules[*]}"
             exit 1
         fi
     done
 fi
 
-if [ ${#MODULES_TO_RUN[@]} -eq 0 ]; then
-    # No arguments provided, run all modules except noise_vectors
-    MODULES_TO_RUN=("${DEFAULT_MODULES_TO_RUN[@]}")
-    echo "Running default modules: ${MODULES_TO_RUN[*]}"
-elif [ "${MODULES_TO_RUN[0]}" = "all" ]; then
-    MODULES_TO_RUN=("${ALL_VALID_MODULES[@]}")
-    echo "Running all modules: ${MODULES_TO_RUN[*]}"
+if [ ${#modules_to_run[@]} -eq 0 ]; then
+    modules_to_run=("${default_modules[@]}")
+    echo "Running default modules: ${modules_to_run[*]}"
+elif [ "${modules_to_run[0]}" = "all" ]; then
+    modules_to_run=("${all_modules[@]}")
+    echo "Running all modules: ${modules_to_run[*]}"
 else
-    echo "Running specified modules: ${MODULES_TO_RUN[*]}"
+    echo "Running specified modules: ${modules_to_run[*]}"
 fi
 echo
 
 # Function to check if a module should be run
 should_run_module() {
     local module_key="$1"
-    for module in "${MODULES_TO_RUN[@]}"; do
+    for module in "${modules_to_run[@]}"; do
         if [ "$module" = "$module_key" ]; then
             return 0
         fi
@@ -109,18 +106,16 @@ run_test() {
         return
     fi
 
-    echo -e "${BLUE}Testing $module_name...${NC}"
-    echo "----------------------------------------"
+    echo "---------------------------------------------"
+    echo -e "${blue}Testing $module_name...${nc}"
+    echo "---------------------------------------------"
 
-    TOTAL_MODULES=$((TOTAL_MODULES + 1))
-
-    if "${LUA_BINARY}" -e "$lua_command" 2>&1; then
-        echo -e "${GREEN}✅ $module_name: ALL TESTS PASSED${NC}"
-        PASSED_MODULES+=("$module_name")
-        PASSED_COUNT=$((PASSED_COUNT + 1))
+    if LUA_PATH="$lua_path" "$lua_binary" -e "$lua_command" 2>&1; then
+        echo -e "${green}✅ $module_name: ALL TESTS PASSED${nc}"
+        passed_modules+=("$module_name")
     else
-        echo -e "${RED}❌ $module_name: TESTS FAILED${NC}"
-        FAILED_MODULES+=("$module_name")
+        echo -e "${red}❌ $module_name: TESTS FAILED${nc}"
+        failed_modules+=("$module_name")
     fi
 
     echo
@@ -130,17 +125,17 @@ run_selftest() {
   local module_name="$1"
   local module_key="$2"
   local lua_module="$3"
-  run_test "${module_name}" "${module_key}" "
-    local result = require('${lua_module}').selftest()
+  run_test "$module_name" "$module_key" "
+    local result = require('$lua_module').selftest()
     if not result then
         os.exit(1)
     end
   "
 }
 
-run_selftest "Utility Functions - 32-bit operations" "utils_bit32" "noiseprotocol.utils.bit32"
-run_selftest "Utility Functions - 64-bit operations" "utils_bit64" "noiseprotocol.utils.bit64"
-run_selftest "Utility Functions - Byte operations" "utils_bytes" "noiseprotocol.utils.bytes"
+run_selftest "Utils - 32-bit operations" "utils_bit32" "noiseprotocol.utils.bit32"
+run_selftest "Utils - 64-bit operations" "utils_bit64" "noiseprotocol.utils.bit64"
+run_selftest "Utils - Byte operations" "utils_bytes" "noiseprotocol.utils.bytes"
 run_selftest "Poly1305 MAC" "poly1305" "noiseprotocol.crypto.poly1305"
 run_selftest "ChaCha20 Stream Cipher" "chacha20" "noiseprotocol.crypto.chacha20"
 run_selftest "ChaCha20-Poly1305 AEAD" "chacha20_poly1305" "noiseprotocol.crypto.chacha20_poly1305"
@@ -149,29 +144,28 @@ run_selftest "X25519 Curve25519 ECDH" "x25519" "noiseprotocol.crypto.x25519"
 run_selftest "X448 Curve448 ECDH" "x448" "noiseprotocol.crypto.x448"
 run_selftest "SHA-256 Cryptographic Hash" "sha256" "noiseprotocol.crypto.sha256"
 run_selftest "SHA-512 Cryptographic Hash" "sha512" "noiseprotocol.crypto.sha512"
-run_selftest "BLAKE2s/BLAKE2b Cryptographic Hash" "blake2" "noiseprotocol.crypto.blake2"
-run_selftest "Noise Protocol Framework" "noise" "noiseprotocol"
+run_selftest "BLAKE2 Cryptographic Hash" "blake2" "noiseprotocol.crypto.blake2"
+run_selftest "Noise Protocol" "noise" "noiseprotocol"
 
 # Function to run noise vectors in parallel
 run_noise_vectors_parallel() {
     set +e  # Disable exit on error for parallel execution
 
-    echo -e "${BLUE}Testing Noise Vectors (Parallel)...${NC}"
-    echo "----------------------------------------"
+    echo "---------------------------------------------"
+    echo -e "${blue}Testing Noise Vectors (Parallel)...${nc}"
+    echo "---------------------------------------------"
 
-    TOTAL_MODULES=$((TOTAL_MODULES + 1))
-
-    local repo_root="$SCRIPT_DIR"
+    local repo_root="$script_dir"
     local temp_dir=$(mktemp -d)
     local all_passed=true
     local num_workers=${NOISE_VECTOR_WORKERS:-4}
 
     # Show vector file info
     echo "Analyzing vector files..."
-    for vector_file in "${NOISE_VECTOR_FILES[@]}"; do
-        local info=$("${LUA_BINARY}" -e "
+    for vector_file in "${vector_files[@]}"; do
+        local info=$(LUA_PATH="$lua_path" "$lua_binary" -e "
             local tv = require('tests.test_noise_vectors')
-            local info = tv.get_vector_info('$repo_root/tests/${NOISE_VECTORS_DIR}/$vector_file')
+            local info = tv.get_vector_info('$repo_root/tests/$vectors_dir/$vector_file')
             print(string.format('%d total', info.total))
         " 2>&1) || { echo "Error getting info: $info"; exit 1; }
         echo "  $vector_file: $info"
@@ -181,7 +175,7 @@ run_noise_vectors_parallel() {
     echo "Running with $num_workers parallel workers..."
 
     # Process each vector file
-    for vector_file in "${NOISE_VECTOR_FILES[@]}"; do
+    for vector_file in "${vector_files[@]}"; do
         echo
         echo "Processing $vector_file..."
 
@@ -189,10 +183,10 @@ run_noise_vectors_parallel() {
         local pids=()
         for ((i=0; i<num_workers; i++)); do
             (
-                "${LUA_BINARY}" "$repo_root/tests/test_noise_vectors.lua" \
-                    "$repo_root/tests/${NOISE_VECTORS_DIR}/$vector_file" "$i" "$num_workers" \
-                    > "$temp_dir/worker_${vector_file}_${i}.out" 2>&1
-                echo $? > "$temp_dir/worker_${vector_file}_${i}.status"
+                LUA_PATH="$lua_path" "$lua_binary" "$repo_root/tests/test_noise_vectors.lua" \
+                    "$repo_root/tests/$vectors_dir/$vector_file" "$i" "$num_workers" \
+                    > "$temp_dir/worker_$vector_file_$i.out" 2>&1
+                echo $? > "$temp_dir/worker_$vector_file_$i.status"
             ) &
             pids+=($!)
         done
@@ -208,8 +202,8 @@ run_noise_vectors_parallel() {
         local worker_failed=false
 
         for ((i=0; i<num_workers; i++)); do
-            local status_file="$temp_dir/worker_${vector_file}_${i}.status"
-            local output_file="$temp_dir/worker_${vector_file}_${i}.out"
+            local status_file="$temp_dir/worker_$vector_file_$i.status"
+            local output_file="$temp_dir/worker_$vector_file_$i.out"
 
             if [ -f "$status_file" ]; then
                 local status=$(cat "$status_file")
@@ -249,12 +243,11 @@ run_noise_vectors_parallel() {
 
     echo
     if [ "$all_passed" = true ]; then
-        echo -e "${GREEN}✅ Noise Vectors: ALL TESTS PASSED${NC}"
-        PASSED_MODULES+=("Noise Vectors")
-        PASSED_COUNT=$((PASSED_COUNT + 1))
+        echo -e "${green}✅ Noise Vectors: ALL TESTS PASSED${nc}"
+        passed_modules+=("Noise Vectors")
     else
-        echo -e "${RED}❌ Noise Vectors: TESTS FAILED${NC}"
-        FAILED_MODULES+=("Noise Vectors")
+        echo -e "${red}❌ Noise Vectors: TESTS FAILED${nc}"
+        failed_modules+=("Noise Vectors")
     fi
 
     echo
@@ -264,18 +257,16 @@ run_noise_vectors_parallel() {
 
 # Function to run noise vectors sequentially
 run_noise_vectors_sequential() {
-    echo -e "${BLUE}Testing Noise Vectors (Sequential)...${NC}"
-    echo "----------------------------------------"
-    TOTAL_MODULES=$((TOTAL_MODULES + 1))
+    echo "---------------------------------------------"
+    echo -e "${blue}Testing Noise Vectors (Sequential)...${nc}"
+    echo "---------------------------------------------"
 
     local all_passed=true
-    for vector_file in "${NOISE_VECTOR_FILES[@]}"; do
+    for vector_file in "${vector_files[@]}"; do
         echo "Processing $vector_file..."
-        if ! "${LUA_BINARY}" -e "
+        if ! LUA_PATH="$lua_path" "$lua_binary" -e "
             local tv = require('tests.test_noise_vectors')
-            local repo_root = os.getenv('SCRIPT_DIR') or '.'
-            local vectors_dir = os.getenv('NOISE_VECTORS_DIR') or 'vectors_sampled'
-            local success = tv.run_all_tests(repo_root .. '/tests/' .. vectors_dir .. '/$vector_file')
+            local success = tv.run_all_tests('$script_dir/tests/$vectors_dir/$vector_file')
             if not success then os.exit(1) end
         " 2>&1; then
             all_passed=false
@@ -283,12 +274,11 @@ run_noise_vectors_sequential() {
     done
 
     if [ "$all_passed" = true ]; then
-        echo -e "${GREEN}✅ Noise Vectors: ALL TESTS PASSED${NC}"
-        PASSED_MODULES+=("Noise Vectors")
-        PASSED_COUNT=$((PASSED_COUNT + 1))
+        echo -e "${green}✅ Noise Vectors: ALL TESTS PASSED${nc}"
+        passed_modules+=("Noise Vectors")
     else
-        echo -e "${RED}❌ Noise Vectors: TESTS FAILED${NC}"
-        FAILED_MODULES+=("Noise Vectors")
+        echo -e "${red}❌ Noise Vectors: TESTS FAILED${nc}"
+        failed_modules+=("Noise Vectors")
     fi
     echo
 }
@@ -304,24 +294,33 @@ if should_run_module "noise_vectors"; then
     fi
 fi
 
-# Summary
-echo "========================================="
-echo "📊 TEST SUMMARY"
-echo "========================================="
+passed_count=${#passed_modules[@]}
+failed_count=${#failed_modules[@]}
+total_count=$((passed_count + failed_count))
 
-if [ $PASSED_COUNT -eq $TOTAL_MODULES ]; then
-    echo -e "${GREEN}🎉 ALL MODULES PASSED: $PASSED_COUNT/$TOTAL_MODULES${NC}"
+# If only one module is run, no need to summarize
+if [ $total_count -eq 1 ]; then
+    exit 0
+fi
+
+# Summary
+echo "============================================="
+echo "📊 TEST SUMMARY"
+echo "============================================="
+
+if [ $passed_count -eq $total_count ]; then
+    echo -e "${green}🎉 ALL MODULES PASSED: $passed_count/$total_count${nc}"
     echo
     echo "Passed modules:"
-    for module in "${PASSED_MODULES[@]}"; do
+    for module in "${passed_modules[@]}"; do
         echo "• $module: ✅ PASS"
     done
     exit 0
 else
-    echo -e "${RED}💥 SOME MODULES FAILED: $PASSED_COUNT/$TOTAL_MODULES passed${NC}"
+    echo -e "${red}💥 SOME MODULES FAILED: $passed_count/$total_count passed${nc}"
     echo
     echo "Failed modules:"
-    for module in "${FAILED_MODULES[@]}"; do
+    for module in "${failed_modules[@]}"; do
         echo "• $module: ❌ FAIL"
     done
     exit 1

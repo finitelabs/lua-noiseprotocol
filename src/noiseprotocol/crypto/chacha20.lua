@@ -1,6 +1,7 @@
 --- @module "noiseprotocol.crypto.chacha20"
 --- ChaCha20 Stream Cipher Implementation for portability.
 
+local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bytes = utils.bytes
@@ -216,6 +217,13 @@ end
 --- @param counter? integer Initial counter value (default: 1)
 --- @return string ciphertext Encrypted data
 function chacha20.encrypt(key, nonce, plaintext, counter)
+  -- Check if we should use OpenSSL
+  local openssl = openssl_wrapper.get()
+  if openssl and #plaintext > 0 then
+    -- Prepend 32-bit counter to 96-bit nonce for complete 128-bit nonce
+    nonce = utils.bytes.u32_to_le_bytes(counter or 1) .. nonce
+    return openssl.cipher.encrypt("chacha20", plaintext, key, nonce)
+  end
   return chacha20.crypt(key, nonce, plaintext, counter)
 end
 
@@ -226,6 +234,13 @@ end
 --- @param counter? integer Initial counter value (default: 1)
 --- @return string plaintext Decrypted data
 function chacha20.decrypt(key, nonce, ciphertext, counter)
+  -- Check if we should use OpenSSL
+  local openssl = openssl_wrapper.get()
+  if openssl and #ciphertext > 0 then
+    -- Prepend 32-bit counter to 96-bit nonce for complete 128-bit nonce
+    nonce = utils.bytes.u32_to_le_bytes(counter or 1) .. nonce
+    return openssl.cipher.decrypt("chacha20", ciphertext, key, nonce)
+  end
   return chacha20.crypt(key, nonce, ciphertext, counter)
 end
 
@@ -467,10 +482,6 @@ end
 --- This function runs comprehensive performance benchmarks for ChaCha20 operations
 --- including block generation and stream encryption/decryption.
 function chacha20.benchmark()
-  print("ChaCha20 Performance Benchmark")
-  print("=" .. string.rep("=", 60))
-  print()
-
   -- Test data
   local key = bytes.from_hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
   local nonce = bytes.from_hex("000000090000004a00000000")
@@ -490,8 +501,6 @@ function chacha20.benchmark()
   benchmark_op("encrypt_8k", function()
     chacha20.encrypt(key, nonce, plaintext_8k, 1)
   end, 50)
-
-  print("\n" .. string.rep("=", 61))
 end
 
 return chacha20

@@ -68,7 +68,7 @@ install-deps:
 	@echo "=== Installing system tools ==="
 	@if command -v brew >/dev/null 2>&1; then \
 		echo "Using Homebrew to install tools..."; \
-		brew install lua-language-server stylua luarocks || true; \
+		brew install lua-language-server stylua || true; \
 	else \
 		echo "Please install the following manually:"; \
 		echo "  - lua-language-server: https://github.com/LuaLS/lua-language-server/releases"; \

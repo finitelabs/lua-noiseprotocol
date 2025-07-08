@@ -1,6 +1,7 @@
 --- @module "noiseprotocol.crypto.blake2"
 --- Pure Lua BLAKE2s and BLAKE2b Implementation for portability.
 
+local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bit64 = utils.bit64
@@ -201,6 +202,13 @@ end
 --- @param data string Input data to hash
 --- @return string hash 32-byte binary hash
 function blake2.blake2s(data)
+  -- Check if we should use OpenSSL
+  local openssl = openssl_wrapper.get()
+  if openssl then
+    return openssl.digest.digest("blake2s256", data, true)
+  end
+
+  -- Native implementation
   -- Initialize hash state
   --- @type HashState
   local h = {}
@@ -277,6 +285,13 @@ end
 --- @param data string Input data to hash
 --- @return string hash 64-byte binary hash
 function blake2.blake2b(data)
+  -- Check if we should use OpenSSL
+  local openssl = openssl_wrapper.get()
+  if openssl then
+    return openssl.digest.digest("blake2b512", data, true)
+  end
+
+  -- Native implementation
   -- Initialize hash state
   --- @type HashState64
   local h = {}
@@ -371,6 +386,13 @@ end
 --- @param data string Data to authenticate
 --- @return string hmac 32-byte HMAC value
 function blake2.hmac_blake2s(key, data)
+  -- Check if we should use OpenSSL
+  local openssl = openssl_wrapper.get()
+  if openssl then
+    return openssl.hmac.hmac("blake2s256", data, key, true)
+  end
+
+  -- Native implementation
   local block_size = 64 -- BLAKE2s block size
 
   -- Keys longer than blocksize are shortened by hashing them
@@ -407,6 +429,13 @@ end
 --- @param data string Data to authenticate
 --- @return string hmac 64-byte HMAC value
 function blake2.hmac_blake2b(key, data)
+  -- Check if we should use OpenSSL
+  local openssl = openssl_wrapper.get()
+  if openssl then
+    return openssl.hmac.hmac("blake2b512", data, key, true)
+  end
+
+  -- Native implementation
   local block_size = 128 -- BLAKE2b block size
 
   -- Keys longer than blocksize are shortened by hashing them
@@ -714,10 +743,6 @@ end
 --- This function runs comprehensive performance benchmarks for BLAKE2 operations
 --- including BLAKE2s and BLAKE2b hash computation for various message sizes.
 function blake2.benchmark()
-  print("BLAKE2 Performance Benchmark")
-  print("=" .. string.rep("=", 60))
-  print()
-
   -- Test data
   local message_64 = string.rep("a", 64)
   local message_1k = string.rep("a", 1024)
@@ -758,8 +783,6 @@ function blake2.benchmark()
   benchmark_op("hmac_blake2s_1k", function()
     blake2.hmac_blake2s(hmac_key, message_1k)
   end, 100)
-
-  print("\n" .. string.rep("=", 61))
 end
 
 return blake2
