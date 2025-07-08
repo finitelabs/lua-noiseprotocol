@@ -53,6 +53,18 @@ build: build/amalg.cache
 	@if command -v amalg.lua >/dev/null 2>&1; then \
 		LUA_PATH="./src/?.lua;./src/?/init.lua;$(LUA_PATH)" amalg.lua -o build/noiseprotocol.lua -C ./build/amalg.cache || exit 1;\
 		echo "Built build/noiseprotocol.lua"; \
+		VERSION=$$(git describe --exact-match --tags 2>/dev/null || echo "dev"); \
+		if [ "$$VERSION" != "dev" ]; then \
+			echo "Injecting version $$VERSION..."; \
+			sed -i.bak 's/VERSION = "dev"/VERSION = "'$$VERSION'"/' build/noiseprotocol.lua && rm build/noiseprotocol.lua.bak; \
+		fi; \
+		echo "Testing version function..."; \
+		LUA_VERSION=$$(lua -e 'local n = require("build.noiseprotocol"); print(n.version())' 2>/dev/null || echo "test failed"); \
+		if [ "$$LUA_VERSION" = "$$VERSION" ]; then \
+			echo "✅ Version correctly set to: $$VERSION"; \
+		else \
+			echo "❌ Version test failed. Expected: $$VERSION, Got: $$LUA_VERSION"; \
+		fi; \
 	else \
 		echo "Error: amalg not found."; \
 		echo "Please install amalg: luarocks install amalg"; \

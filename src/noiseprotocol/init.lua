@@ -23,12 +23,22 @@ local crypto = require("noiseprotocol.crypto")
 local utils = require("noiseprotocol.utils")
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 
+--- Module version
+local VERSION = "dev"
+
 local noise = {
   --- Enable or disable OpenSSL acceleration
   --- @function use_openssl
   --- @param use boolean True to enable OpenSSL, false to disable
   --- @see noiseprotocol.openssl_wrapper.use
   use_openssl = openssl_wrapper.use,
+
+  --- Get the module version
+  --- @function version
+  --- @return string version The version string
+  version = function()
+    return VERSION
+  end,
 }
 
 -- ============================================================================

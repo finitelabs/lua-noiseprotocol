@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Lua
+        uses: leafo/gh-actions-lua@v11
+        with:
+          luaVersion: '5.4'
+
+      - name: Setup LuaRocks
+        uses: leafo/gh-actions-luarocks@v5
+        with:
+          luarocksVersion: "3.12.2"
+
+      - name: Install amalg
+        run: luarocks install amalg
+
+      - name: Build combined module
+        run: |
+          # The make build command will automatically inject the version from the git tag
+          make build
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+          name: Release ${{ github.ref_name }}
+          tag_name: ${{ github.ref }}
+          generate_release_notes: true
+          files: |
+            build/noiseprotocol.lua
