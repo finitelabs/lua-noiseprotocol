@@ -1,6 +1,7 @@
 --- @module "noiseprotocol.crypto.chacha20_poly1305"
 --- ChaCha20-Poly1305 Authenticated Encryption with Associated Data (AEAD) Implementation for portability.
 
+local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
@@ -60,6 +61,30 @@ function chacha20_poly1305.encrypt(key, nonce, plaintext, aad)
 
   aad = aad or ""
 
+  local openssl = openssl_wrapper.get()
+  if openssl then
+    local evp = openssl.cipher.get("chacha20-poly1305")
+    local e = evp:encrypt_new()
+    e:ctrl(openssl.cipher.EVP_CTRL_GCM_SET_IVLEN, #nonce)
+    e:init(key, nonce)
+
+    -- Indicate that the AAD setting is set
+    local aad_update = e:update(aad, true) or ""
+    if #aad_update > 0 then
+      error("AAD update should not return data in AEAD mode")
+    end
+    local ciphertext = e:update(plaintext)
+    local final = e:final() or ""
+    if #final > 0 then
+      error("Finalization should not return data in AEAD mode")
+    end
+    local tag = e:ctrl(openssl.cipher.EVP_CTRL_GCM_GET_TAG, 16) or ""
+    if #tag ~= 16 then
+      error("Tag length must be exactly 16 bytes in AEAD mode")
+    end
+    return ciphertext .. tag
+  end
+
   -- Step 1: Generate Poly1305 one-time key
   local poly_key = poly1305_key_gen(key, nonce)
 
@@ -97,6 +122,29 @@ function chacha20_poly1305.decrypt(key, nonce, ciphertext_and_tag, aad)
   local ciphertext_len = #ciphertext_and_tag - 16
   local ciphertext = string.sub(ciphertext_and_tag, 1, ciphertext_len)
   local received_tag = string.sub(ciphertext_and_tag, ciphertext_len + 1)
+
+  local openssl = openssl_wrapper.get()
+  if openssl then
+    local evp = openssl.cipher.get("chacha20-poly1305")
+    local e = evp:decrypt_new()
+    e:ctrl(openssl.cipher.EVP_CTRL_GCM_SET_IVLEN, #nonce)
+    e:ctrl(openssl.cipher.EVP_CTRL_GCM_SET_TAG, received_tag)
+    e:init(key, nonce)
+
+    -- Indicate that the AAD setting is set
+    local aad_update = e:update(aad, true) or ""
+    if #aad_update > 0 then
+      error("AAD update should not return data in AEAD mode")
+    end
+    local plaintext = e:update(ciphertext)
+    local final = e:final()
+    if final == nil then
+      return nil -- Authentication failed
+    elseif #final > 0 then
+      error("Finalization should not return data in AEAD mode")
+    end
+    return plaintext
+  end
 
   -- Step 2: Generate Poly1305 one-time key (same as encryption)
   local poly_key = poly1305_key_gen(key, nonce)
@@ -367,10 +415,6 @@ end
 --- This function runs comprehensive performance benchmarks for ChaCha20-Poly1305 operations
 --- including authenticated encryption and decryption for various message sizes.
 function chacha20_poly1305.benchmark()
-  print("ChaCha20-Poly1305 Performance Benchmark")
-  print("=" .. string.rep("=", 60))
-  print()
-
   -- Test data
   local key = bytes.from_hex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f")
   local nonce = bytes.from_hex("070000004041424344454647")
@@ -409,8 +453,6 @@ function chacha20_poly1305.benchmark()
   benchmark_op("decrypt_8k", function()
     chacha20_poly1305.decrypt(key, nonce, ct_8k, aad)
   end, 25)
-
-  print("\n" .. string.rep("=", 61))
 end
 
 return chacha20_poly1305

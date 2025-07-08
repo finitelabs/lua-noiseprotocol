@@ -656,10 +656,6 @@ x448._key_counter = 0
 --- This function runs comprehensive performance benchmarks for X448 operations
 --- including key generation, public key derivation, and Diffie-Hellman operations.
 function x448.benchmark()
-  print("X448 Performance Benchmark")
-  print("=" .. string.rep("=", 60))
-  print()
-
   -- Test data from RFC 7748
   local test_scalar = bytes.from_hex(
     "3d262fddf9ec8e88495266fea19a34d28882acef045104d0d1aae121"
@@ -682,8 +678,6 @@ function x448.benchmark()
   benchmark_op("diffie_hellman", function()
     x448.diffie_hellman(test_scalar, test_point)
   end, 10)
-
-  print("\n" .. string.rep("=", 61))
 end
 
 return x448

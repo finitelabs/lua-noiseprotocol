@@ -1,6 +1,7 @@
 --- @module "noiseprotocol.crypto.sha512"
 --- Pure Lua SHA-512 Implementation for portability.
 
+local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bit64 = utils.bit64
@@ -216,6 +217,13 @@ end
 --- @param data string Input data to hash
 --- @return string hash 64-byte binary hash
 function sha512.sha512(data)
+  -- Check if we should use OpenSSL
+  local openssl = openssl_wrapper.get()
+  if openssl then
+    return openssl.digest.digest("sha512", data, true)
+  end
+
+  -- Native implementation
   -- Initialize hash values
   --- @type HashState64
   local H = {}
@@ -273,6 +281,13 @@ end
 --- @param data string Data to authenticate
 --- @return string hmac 64-byte HMAC value
 function sha512.hmac_sha512(key, data)
+  -- Check if we should use OpenSSL
+  local openssl = openssl_wrapper.get()
+  if openssl then
+    return openssl.hmac.hmac("sha512", data, key, true)
+  end
+
+  -- Native implementation
   local block_size = 128 -- SHA-512 block size
 
   -- Keys longer than blocksize are shortened by hashing them
@@ -482,10 +497,6 @@ end
 --- This function runs comprehensive performance benchmarks for SHA-512 operations
 --- including hash computation and HMAC for various message sizes.
 function sha512.benchmark()
-  print("SHA-512 Performance Benchmark")
-  print("=" .. string.rep("=", 60))
-  print()
-
   -- Test data
   local message_64 = string.rep("a", 64)
   local message_1k = string.rep("a", 1024)
@@ -517,8 +528,6 @@ function sha512.benchmark()
   benchmark_op("hmac_8k", function()
     sha512.hmac_sha512(hmac_key, message_8k)
   end, 15)
-
-  print("\n" .. string.rep("=", 61))
 end
 
 return sha512

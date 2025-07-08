@@ -35,6 +35,9 @@ Here's a complete example of the Noise XX pattern from the specification:
 ```lua
 local noise = require("noiseprotocol")
 
+-- Optionally enable OpenSSL support if available
+-- noise.use_openssl(true)
+
 -- Generate static keys for both parties
 local alice_static_key = noise.DH["25519"].generate_keypair()
 local bob_static_key = noise.DH["25519"].generate_keypair()
@@ -129,9 +132,6 @@ LUA_BINARY=lua5.1 ./run_tests.sh
 
 ## Future Plans
 
-- Add support for [lua-openssl](https://github.com/zhaozg/lua-openssl) as an
-  optional backend
-- Fallback system: use native crypto when available, pure Lua as fallback
 - Performance optimizations for the pure Lua implementation
 
 ## Security Warning
@@ -149,7 +149,7 @@ native cryptographic libraries.
 
 ## License
 
-Apache License 2.0 - see LICENSE file for details
+GNU Affero General Public License v3.0 - see LICENSE file for details
 
 ## Contributing
 

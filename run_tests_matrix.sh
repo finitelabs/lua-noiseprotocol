@@ -1,52 +1,76 @@
 #!/bin/bash
 
-# List of Lua versions to test
-LUA_VERSIONS=("lua5.1" "lua5.2" "lua5.3" "lua5.4" "luajit")
+# List of luaenv versions to test
+LUA_VERSIONS=("5.1.5" "5.2.4" "5.3.6" "5.4.8" "luajit-2.1-dev")
 
 # Colors for output
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-NC='\033[0m' # No Color
+green='\033[0;32m'
+yellow='\033[1;33m'
+red='\033[0;31m'
+nc='\033[0m' # No Color
+
+luaenv_binary="${LUAENV_BINARY:-luaenv}"  # Use luaenv by default, can be overridden
 
 # Get script directory
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+if ! command -v "$luaenv_binary" &> /dev/null; then
+    echo -e "${red}❌ Error: $luaenv_binary command not found.${nc}"
+    exit 1
+fi
+
+if [ ! -d "$($luaenv_binary prefix)/../../plugins/luaenv-luarocks" ]; then
+    echo -e "${red}❌ Error: luaenv-luarocks plugin not found. Please install it first.${nc}"
+    exit 1
+fi
 
 # Track overall results
-FAILED_VERSIONS=()
+failed_versions=()
+passed_versions=()
 
 for lua_version in "${LUA_VERSIONS[@]}"; do
-    echo "========================================="
-    echo "Running tests with $lua_version"
-    echo "========================================="
+    echo -e "${yellow}~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${nc}"
+    echo -e "${yellow}Running tests with $lua_version${nc}"
+    echo -e "${yellow}~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${nc}"
+    echo
 
-    # Check if the Lua version is available
-    if ! command -v "$lua_version" &> /dev/null; then
-        echo -e "${RED}❌ Error: '$lua_version' not found, skipping...${NC}"
-        FAILED_VERSIONS+=("$lua_version (not installed)")
-        continue
-    fi
-
-    # Export LUA_BINARY for run_tests.sh
-    export LUA_BINARY="$lua_version"
+    "$luaenv_binary" install -s $lua_version
+    lua_prefix="$($luaenv_binary prefix $lua_version)"
+    lua_binary="$lua_prefix/bin/lua"
+    luarocks_binary="$lua_prefix/bin/luarocks"
 
     # Run the tests and pass all arguments
-    if ! "$SCRIPT_DIR/run_tests.sh" "$@"; then
-        FAILED_VERSIONS+=("$lua_version")
+    if ! LUA_BINARY="$lua_binary" "$script_dir/run_tests.sh" "$@"; then
+        failed_versions+=("$lua_version")
+    else
+        passed_versions+=("$lua_version")
     fi
 
+    echo -e "${yellow}~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${nc}"
+    echo -e "${yellow}Running tests with $lua_version (OpenSSL)${nc}"
+    echo -e "${yellow}~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${nc}"
     echo
+
+    "$luarocks_binary" install openssl 1>/dev/null
+
+    if ! NOISE_USE_OPENSSL=1 LUA_BINARY="$lua_binary" "$script_dir/run_tests.sh" "$@"; then
+        failed_versions+=("$lua_version (OpenSSL)")
+    else
+        passed_versions+=("$lua_version (OpenSSL)")
+    fi
 done
 
 # Final summary
-echo "========================================="
+echo "============================================="
 echo "📊 Matrix Test Summary"
-echo "========================================="
+echo "============================================="
 
-if [ ${#FAILED_VERSIONS[@]} -eq 0 ]; then
-    echo -e "${GREEN}✅ All LUA VERSIONS PASSED${NC}"
+if [ ${#failed_versions[@]} -eq 0 ]; then
+    echo -e "${green}✅ All LUA VERSIONS PASSED:${nc}"
+    printf '%s\n' "${passed_versions[@]}"
     exit 0
 else
-    echo -e "${RED}💥 SOME LUA VERSIONS FAILED:${NC}"
-    printf '%s\n' "${FAILED_VERSIONS[@]}"
+    echo -e "${red}💥 SOME LUA VERSIONS FAILED:${nc}"
+    printf '%s\n' "${failed_versions[@]}"
     exit 1
 fi
