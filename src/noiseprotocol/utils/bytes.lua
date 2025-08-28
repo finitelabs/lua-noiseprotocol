@@ -1,9 +1,8 @@
 --- @module "noiseprotocol.utils.bytes"
 --- Byte manipulation and conversion utilities
+local bytes = {}
 
 local bit32 = require("noiseprotocol.utils.bit32")
-
-local bytes = {}
 
 --- Convert binary string to hexadecimal string
 --- @param str string Binary string

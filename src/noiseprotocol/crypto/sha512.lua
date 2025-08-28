@@ -1,5 +1,6 @@
 --- @module "noiseprotocol.crypto.sha512"
 --- Pure Lua SHA-512 Implementation for portability.
+local sha512 = {}
 
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
@@ -10,7 +11,6 @@ local benchmark_op = utils.benchmark.benchmark_op
 
 -- SHA-512 uses 64-bit words, but Lua numbers are limited to 2^53-1
 -- We'll work with 32-bit high/low pairs for 64-bit arithmetic
-local sha512 = {}
 
 -- SHA-512 round constants (first 64 bits of fractional parts of cube roots of first 80 primes)
 --- @type Int64HighLow[]

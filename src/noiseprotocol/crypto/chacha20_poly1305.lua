@@ -1,5 +1,6 @@
 --- @module "noiseprotocol.crypto.chacha20_poly1305"
 --- ChaCha20-Poly1305 Authenticated Encryption with Associated Data (AEAD) Implementation for portability.
+local chacha20_poly1305 = {}
 
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
@@ -7,8 +8,6 @@ local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
 local chacha20 = require("noiseprotocol.crypto.chacha20")
 local poly1305 = require("noiseprotocol.crypto.poly1305")
-
-local chacha20_poly1305 = {}
 
 --- Generate Poly1305 one-time key using ChaCha20
 --- @param key string 32-byte ChaCha20 key
@@ -61,7 +60,7 @@ function chacha20_poly1305.encrypt(key, nonce, plaintext, aad)
 
   aad = aad or ""
 
-  local openssl = openssl_wrapper.get()
+  local openssl = openssl_wrapper.get(openssl_wrapper.Feature.AAD)
   if openssl then
     local evp = openssl.cipher.get("chacha20-poly1305")
     local e = evp:encrypt_new()
@@ -123,7 +122,7 @@ function chacha20_poly1305.decrypt(key, nonce, ciphertext_and_tag, aad)
   local ciphertext = string.sub(ciphertext_and_tag, 1, ciphertext_len)
   local received_tag = string.sub(ciphertext_and_tag, ciphertext_len + 1)
 
-  local openssl = openssl_wrapper.get()
+  local openssl = openssl_wrapper.get(openssl_wrapper.Feature.AAD)
   if openssl then
     local evp = openssl.cipher.get("chacha20-poly1305")
     local e = evp:decrypt_new()

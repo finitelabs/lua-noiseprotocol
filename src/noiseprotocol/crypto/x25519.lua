@@ -1,6 +1,5 @@
 --- @module "noiseprotocol.crypto.x25519"
 --- X25519 Curve25519 Elliptic Curve Diffie-Hellman Implementation for portability.
-
 local x25519 = {}
 
 local utils = require("noiseprotocol.utils")

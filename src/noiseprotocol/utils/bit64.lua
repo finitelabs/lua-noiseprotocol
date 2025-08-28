@@ -1,9 +1,8 @@
 --- @module "noiseprotocol.utils.bit64"
 --- 64-bit bitwise operations using high/low pairs
+local bit64 = {}
 
 local bit32 = require("noiseprotocol.utils.bit32")
-
-local bit64 = {}
 
 -- Type definitions
 --- @alias Int64HighLow [integer, integer] Array with [1]=high 32 bits, [2]=low 32 bits

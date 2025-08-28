@@ -1,6 +1,5 @@
 --- @module "noiseprotocol.utils.bit32"
 --- 32-bit bitwise operations
-
 local bit32 = {}
 
 -- 32-bit mask for ensuring results stay within 32-bit range
