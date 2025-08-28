@@ -1,13 +1,12 @@
 --- @module "noiseprotocol.crypto.sha256"
 --- Pure Lua SHA-256 Implementation for portability.
+local sha256 = {}
 
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
-
-local sha256 = {}
 
 -- SHA-256 constants (first 32 bits of fractional parts of cube roots of first 64 primes)
 --- @type integer[64]

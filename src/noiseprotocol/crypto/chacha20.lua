@@ -1,13 +1,12 @@
 --- @module "noiseprotocol.crypto.chacha20"
 --- ChaCha20 Stream Cipher Implementation for portability.
+local chacha20 = {}
 
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
-
-local chacha20 = {}
 
 -- Type definitions for better type checking
 

@@ -1,13 +1,12 @@
 --- @module "noiseprotocol.crypto.aes_gcm"
 --- AES-GCM Authenticated Encryption with Associated Data (AEAD) Implementation for portability.
+local aes_gcm = {}
 
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
-
-local aes_gcm = {}
 
 -- ============================================================================
 -- AES CORE IMPLEMENTATION
@@ -668,7 +667,7 @@ function aes_gcm.encrypt(key, nonce, plaintext, aad)
 
   aad = aad or ""
 
-  local openssl = openssl_wrapper.get()
+  local openssl = openssl_wrapper.get(openssl_wrapper.Feature.AAD)
   if openssl then
     local evp = openssl.cipher.get("aes-" .. #key * 8 .. "-gcm")
     local e = evp:encrypt_new()
@@ -744,7 +743,7 @@ function aes_gcm.decrypt(key, nonce, ciphertext_and_tag, aad)
   local ciphertext = string.sub(ciphertext_and_tag, 1, ciphertext_len)
   local received_tag = string.sub(ciphertext_and_tag, ciphertext_len + 1)
 
-  local openssl = openssl_wrapper.get()
+  local openssl = openssl_wrapper.get(openssl_wrapper.Feature.AAD)
   if openssl then
     local evp = openssl.cipher.get("aes-" .. #key * 8 .. "-gcm")
     local e = evp:decrypt_new()

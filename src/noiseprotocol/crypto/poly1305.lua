@@ -1,12 +1,11 @@
 --- @module "noiseprotocol.crypto.poly1305"
 --- Poly1305 Message Authentication Code (MAC) Implementation for portability.
+local poly1305 = {}
 
 local utils = require("noiseprotocol.utils")
 local bit32 = utils.bit32
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
-
-local poly1305 = {}
 
 -- Type definitions for better type checking
 

@@ -1,6 +1,5 @@
 --- @module "noiseprotocol.crypto"
-
-return {
+local crypto = {
   -- Hash functions
   sha256 = require("noiseprotocol.crypto.sha256"),
   sha512 = require("noiseprotocol.crypto.sha512"),
@@ -20,3 +19,5 @@ return {
   x25519 = require("noiseprotocol.crypto.x25519"),
   x448 = require("noiseprotocol.crypto.x448"),
 }
+
+return crypto

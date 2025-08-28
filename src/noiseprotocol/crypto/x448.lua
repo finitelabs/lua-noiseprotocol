@@ -9,6 +9,7 @@
 --- - Field arithmetic modulo p = 2^448 - 2^224 - 1
 --- - Scalar multiplication on Curve448
 --- - Key generation and Diffie-Hellman operations
+local x448 = {}
 
 local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
@@ -20,8 +21,6 @@ local rshift = utils.bit32.rshift
 local floor = math.floor
 local char = string.char
 local byte = string.byte
-
-local x448 = {}
 
 -- Constants for X448 implementation
 -- Field prime p = 2^448 - 2^224 - 1 (Goldilocks prime)

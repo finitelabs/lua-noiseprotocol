@@ -18,6 +18,7 @@
 ---   static_key = my_static_key
 --- })
 --- ...
+local noiseprotocol = {}
 
 local crypto = require("noiseprotocol.crypto")
 local utils = require("noiseprotocol.utils")
@@ -26,20 +27,20 @@ local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 --- Module version
 local VERSION = "dev"
 
-local noise = {
-  --- Enable or disable OpenSSL acceleration
-  --- @function use_openssl
-  --- @param use boolean True to enable OpenSSL, false to disable
-  --- @see noiseprotocol.openssl_wrapper.use
-  use_openssl = openssl_wrapper.use,
+--- Enable or disable OpenSSL acceleration
+--- @function use_openssl
+--- @param use boolean True to enable OpenSSL, false to disable
+--- @see noiseprotocol.openssl_wrapper.use
+function noiseprotocol.use_openssl(use)
+  openssl_wrapper.use(use)
+end
 
-  --- Get the module version
-  --- @function version
-  --- @return string version The version string
-  version = function()
-    return VERSION
-  end,
-}
+--- Get the module version
+--- @function version
+--- @return string version The version string
+function noiseprotocol.version()
+  return VERSION
+end
 
 -- ============================================================================
 -- PROTOCOL NAME PARSING
@@ -1580,19 +1581,19 @@ function NoiseConnection:new(config)
 
   -- Get cipher suite components
   -- Map DH functions
-  local dh = noise.DH[parsed.dh]
+  local dh = noiseprotocol.DH[parsed.dh]
   if dh == nil then
     error("Unknown DH function: " .. parsed.dh)
   end
 
   -- Map cipher functions
-  local cipher = noise.Cipher[parsed.cipher]
+  local cipher = noiseprotocol.Cipher[parsed.cipher]
   if cipher == nil then
     error("Unknown cipher: " .. parsed.cipher)
   end
 
   -- Map hash functions
-  local hash = noise.Hash[parsed.hash]
+  local hash = noiseprotocol.Hash[parsed.hash]
   if hash == nil then
     error("Unknown hash: " .. parsed.hash)
   end
@@ -1724,7 +1725,7 @@ end
 --- considered cryptographically safe.
 ---
 --- @return boolean result True if all tests pass, false otherwise
-function noise.selftest()
+function noiseprotocol.selftest()
   local function functional_tests()
     print("Running Noise Protocol functional tests...")
     local passed = 0
@@ -2007,7 +2008,7 @@ function noise.selftest()
           protocol_name = "Noise_XXpsk0_25519_ChaChaPoly_SHA256",
           initiator = true,
           psk = nil, -- No PSK provided
-          psk_placement = noise.PSKPlacement.ZERO,
+          psk_placement = noiseprotocol.PSKPlacement.ZERO,
         })
         client_no_psk:start_handshake("test")
         client_no_psk:write_handshake_message("test") -- Should fail here due to missing PSK
@@ -2022,7 +2023,7 @@ function noise.selftest()
           protocol_name = "Noise_NN_25519_ChaChaPoly_SHA256",
           initiator = true,
           psk = psk,
-          psk_placement = noise.PSKPlacement.ZERO,
+          psk_placement = noiseprotocol.PSKPlacement.ZERO,
         })
         client_with_psk:start_handshake("test")
         client_with_psk:write_handshake_message("test") -- Should work with PSK
@@ -2208,19 +2209,19 @@ function noise.selftest()
 end
 
 --- @type table<string, DHFunction>
-noise.DH = {
+noiseprotocol.DH = {
   [DH_25519.name] = DH_25519,
   [DH_448.name] = DH_448,
 }
 
 --- @type table<string, CipherFunction>
-noise.Cipher = {
+noiseprotocol.Cipher = {
   [CIPHER_ChaChaPoly.name] = CIPHER_ChaChaPoly,
   [CIPHER_AESGCM.name] = CIPHER_AESGCM,
 }
 
 --- @type table<string, HashFunction>
-noise.Hash = {
+noiseprotocol.Hash = {
   [HASH_SHA256.name] = HASH_SHA256,
   [HASH_SHA512.name] = HASH_SHA512,
   [HASH_BLAKE2S.name] = HASH_BLAKE2S,
@@ -2228,16 +2229,16 @@ noise.Hash = {
 }
 
 -- Utility types
-noise.CipherState = CipherState
-noise.SymmetricState = SymmetricState
-noise.HandshakeState = HandshakeState
-noise.NoiseConnection = NoiseConnection
-noise.CipherSuite = CipherSuite
-noise.PSKPlacement = PSKPlacement
-noise.NoisePattern = NoisePattern
+noiseprotocol.CipherState = CipherState
+noiseprotocol.SymmetricState = SymmetricState
+noiseprotocol.HandshakeState = HandshakeState
+noiseprotocol.NoiseConnection = NoiseConnection
+noiseprotocol.CipherSuite = CipherSuite
+noiseprotocol.PSKPlacement = PSKPlacement
+noiseprotocol.NoisePattern = NoisePattern
 
 -- Export submodules for convenience
-noise.crypto = crypto
-noise.utils = utils
+noiseprotocol.crypto = crypto
+noiseprotocol.utils = utils
 
-return noise
+return noiseprotocol

@@ -1,5 +1,6 @@
 --- @module "noiseprotocol.crypto.blake2"
 --- Pure Lua BLAKE2s and BLAKE2b Implementation for portability.
+local blake2 = {}
 
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
@@ -7,8 +8,6 @@ local bit32 = utils.bit32
 local bit64 = utils.bit64
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
-
-local blake2 = {}
 
 -- BLAKE2s initialization vectors (first 32 bits of fractional parts of square roots of first 8 primes)
 --- @type HashState
