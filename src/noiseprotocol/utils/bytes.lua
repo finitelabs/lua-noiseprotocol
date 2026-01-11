@@ -2,7 +2,7 @@
 --- Byte manipulation and conversion utilities
 local bytes = {}
 
-local bit32 = require("noiseprotocol.utils.bit32")
+local bit32 = require("vendor.bitn").bit32
 
 --- Convert binary string to hexadecimal string
 --- @param str string Binary string

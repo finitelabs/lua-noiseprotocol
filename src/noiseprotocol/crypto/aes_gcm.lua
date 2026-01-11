@@ -2,9 +2,10 @@
 --- AES-GCM Authenticated Encryption with Associated Data (AEAD) Implementation for portability.
 local aes_gcm = {}
 
+local bit32 = require("vendor.bitn").bit32
+
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
-local bit32 = utils.bit32
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
 

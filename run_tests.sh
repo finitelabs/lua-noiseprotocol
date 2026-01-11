@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # Noise Protocol Library Test Runner
-# Runs all test suites for ChaCha20, Poly1305, and ChaCha20-Poly1305 AEAD
 #
 # Usage: ./run_tests.sh [module_names...]
 #
@@ -45,7 +44,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # Add repository root to Lua's package path
 # This allows require() to find modules in the src/tests directories
-lua_path="$script_dir/?.lua;$script_dir/?/init.lua;$script_dir/src/?.lua;$script_dir/src/?/init.lua;$LUA_PATH"
+lua_path="$script_dir/?.lua;$script_dir/?/init.lua;$script_dir/src/?.lua;$script_dir/src/?/init.lua;$script_dir/tests/?.lua;$script_dir/vendor/?.lua;$LUA_PATH"
 
 # Define noise vector files
 vectors_dir="${NOISE_VECTORS_DIR:=vectors_sampled}"
@@ -133,8 +132,6 @@ run_selftest() {
   "
 }
 
-run_selftest "Utils - 32-bit operations" "utils_bit32" "noiseprotocol.utils.bit32"
-run_selftest "Utils - 64-bit operations" "utils_bit64" "noiseprotocol.utils.bit64"
 run_selftest "Utils - Byte operations" "utils_bytes" "noiseprotocol.utils.bytes"
 run_selftest "Poly1305 MAC" "poly1305" "noiseprotocol.crypto.poly1305"
 run_selftest "ChaCha20 Stream Cipher" "chacha20" "noiseprotocol.crypto.chacha20"
@@ -300,6 +297,9 @@ total_count=$((passed_count + failed_count))
 
 # If only one module is run, no need to summarize
 if [ $total_count -eq 1 ]; then
+    if [ $failed_count -gt 0 ]; then
+        exit 1
+    fi
     exit 0
 fi
 

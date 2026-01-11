@@ -2,8 +2,9 @@
 --- X25519 Curve25519 Elliptic Curve Diffie-Hellman Implementation for portability.
 local x25519 = {}
 
+local bit32 = require("vendor.bitn").bit32
+
 local utils = require("noiseprotocol.utils")
-local bit32 = utils.bit32
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
 

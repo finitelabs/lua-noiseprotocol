@@ -2,9 +2,10 @@
 --- Pure Lua SHA-256 Implementation for portability.
 local sha256 = {}
 
+local bit32 = require("vendor.bitn").bit32
+
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
-local bit32 = utils.bit32
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
 
