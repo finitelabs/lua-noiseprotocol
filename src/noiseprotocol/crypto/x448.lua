@@ -11,13 +11,15 @@
 --- - Key generation and Diffie-Hellman operations
 local x448 = {}
 
+local bitn = require("vendor.bitn")
+local band = bitn.bit32.band
+local bor = bitn.bit32.bor
+local bxor = bitn.bit32.bxor
+local rshift = bitn.bit32.rshift
+
 local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
-local band = utils.bit32.band
-local bor = utils.bit32.bor
-local bxor = utils.bit32.bxor
-local rshift = utils.bit32.rshift
 local floor = math.floor
 local char = string.char
 local byte = string.byte

@@ -161,7 +161,7 @@ help:
 	@echo "  make bench-<name>      - Run specific benchmark (e.g., make bench-x25519)"
 	@echo ""
 	@echo "Building:"
-	@echo "  make build             - Build single-file distributions"
+	@echo "  make build             - Build single-file distribution"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  make format            - Format all code (Lua)"

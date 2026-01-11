@@ -2,10 +2,12 @@
 --- Pure Lua BLAKE2s and BLAKE2b Implementation for portability.
 local blake2 = {}
 
+local bitn = require("vendor.bitn")
+local bit32 = bitn.bit32
+local bit64 = bitn.bit64
+
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
-local bit32 = utils.bit32
-local bit64 = utils.bit64
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
 
