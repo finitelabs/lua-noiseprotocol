@@ -53,17 +53,20 @@ build: build/amalg.cache
 	@if command -v amalg.lua >/dev/null 2>&1; then \
 		LUA_PATH="./src/?.lua;./src/?/init.lua;$(LUA_PATH)" amalg.lua -o build/noiseprotocol.lua -C ./build/amalg.cache || exit 1;\
 		echo "Built build/noiseprotocol.lua"; \
+		LUA_PATH="./src/?.lua;./src/?/init.lua;$(LUA_PATH)" amalg.lua -o build/noiseprotocol-core.lua -C ./build/amalg.cache -i "vendor%." || exit 1;\
+		echo "Built build/noiseprotocol-core.lua (no vendor dependencies)"; \
 		VERSION=$$(git describe --exact-match --tags 2>/dev/null || echo "dev"); \
 		if [ "$$VERSION" != "dev" ]; then \
 			echo "Injecting version $$VERSION..."; \
 			sed -i.bak 's/VERSION = "dev"/VERSION = "'$$VERSION'"/' build/noiseprotocol.lua && rm build/noiseprotocol.lua.bak; \
+			sed -i.bak 's/VERSION = "dev"/VERSION = "'$$VERSION'"/' build/noiseprotocol-core.lua && rm build/noiseprotocol-core.lua.bak; \
 		fi; \
 		echo "Testing version function..."; \
 		LUA_VERSION=$$(lua -e 'local n = require("build.noiseprotocol"); print(n.version())' 2>/dev/null || echo "test failed"); \
 		if [ "$$LUA_VERSION" = "$$VERSION" ]; then \
-			echo "✅ Version correctly set to: $$VERSION"; \
+			echo "Version correctly set to: $$VERSION"; \
 		else \
-			echo "❌ Version test failed. Expected: $$VERSION, Got: $$LUA_VERSION"; \
+			echo "Version test failed. Expected: $$VERSION, Got: $$LUA_VERSION"; \
 		fi; \
 	else \
 		echo "Error: amalg not found."; \
