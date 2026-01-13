@@ -17,6 +17,18 @@ runs on Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT.
 
 ## Installation
 
+### Option 1: Single-file Distribution (Recommended)
+
+Download a pre-built single-file module from the
+[Releases](https://github.com/finitelabs/lua-noiseprotocol/releases) page:
+
+- **`noiseprotocol.lua`** - Complete bundle with all dependencies included (zero
+  external dependencies)
+- **`noiseprotocol-core.lua`** - Core library only, requires `vendor.bitn` to be
+  installed separately
+
+### Option 2: From Source
+
 Clone this repository:
 
 ```bash
@@ -24,7 +36,8 @@ git clone https://github.com/finitelabs/lua-noiseprotocol.git
 cd lua-noiseprotocol
 ```
 
-Add the `src` directory to your Lua path, or copy the files to your project.
+Add the `src` and `vendor` directories to your Lua path, or copy the files to
+your project.
 
 ## Usage
 
