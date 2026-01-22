@@ -154,7 +154,7 @@ function bit16.arshift(a, n)
   -- If original was negative, fill high bits with 1s
   if is_negative then
     -- Create mask for high bits that need to be 1
-    local fill_mask = MASK16 - (math.pow(2, 16 - n) - 1)
+    local fill_mask = MASK16 - (math.floor(2 ^ (16 - n)) - 1)
     result = bit16.bor(result, fill_mask)
   end
 
@@ -420,15 +420,20 @@ function bit16.selftest()
     else
       print("  FAIL: " .. test.name)
       if type(test.expected) == "string" then
-        local exp_hex, got_hex = "", ""
-        for i = 1, #test.expected do
-          exp_hex = exp_hex .. string.format("%02X", string.byte(test.expected, i))
+        if type(result) ~= "string" then
+          print("    Expected: string")
+          print("    Got:      " .. type(result))
+        else
+          local exp_hex, got_hex = "", ""
+          for i = 1, #test.expected do
+            exp_hex = exp_hex .. string.format("%02X", string.byte(test.expected, i))
+          end
+          for i = 1, #result do
+            got_hex = got_hex .. string.format("%02X", string.byte(result, i))
+          end
+          print("    Expected: " .. exp_hex)
+          print("    Got:      " .. got_hex)
         end
-        for i = 1, #result do
-          got_hex = got_hex .. string.format("%02X", string.byte(result, i))
-        end
-        print("    Expected: " .. exp_hex)
-        print("    Got:      " .. got_hex)
       else
         print(string.format("    Expected: 0x%04X", test.expected))
         print(string.format("    Got:      0x%04X", result))
@@ -981,8 +986,8 @@ end
 
 --- Check if a value is an Int64 (created by bit64 functions).
 --- @param value any Value to check
---- @return boolean isInt64 True if value is an Int64
-function bit64.isInt64(value)
+--- @return boolean is_int64 True if value is an Int64
+function bit64.is_int64(value)
   return type(value) == "table" and getmetatable(value) == Int64Meta
 end
 
@@ -1240,10 +1245,16 @@ end
 --- Warning: Lua numbers use 64-bit IEEE 754 doubles with 53-bit mantissa precision.
 --- Values exceeding 53 bits (greater than 9007199254740991) will lose precision.
 --- To maintain full 64-bit precision, keep values in {high, low} format.
---- @param value Int64HighLow The {high_32, low_32} pair.
+--- @param value number|Int64HighLow The {high_32, low_32} pair (or number to pass through).
 --- @param strict? boolean If true, errors when value exceeds 53-bit precision.
 --- @return number result The value as a Lua number (may lose precision for large values unless strict).
 function bit64.to_number(value, strict)
+  if type(value) == "number" then
+    return value
+  end
+  if not bit64.is_int64(value) then
+    error("Value is not a valid Int64HighLow pair", 2)
+  end
   if strict and value[1] > 0x001FFFFF then
     error("Value exceeds 53-bit precision (max: 9007199254740991)", 2)
   end
@@ -1251,10 +1262,15 @@ function bit64.to_number(value, strict)
 end
 
 --- Creates a {high, low} pair from a Lua number.
---- @param value number The number to convert.
+--- @param value number|Int64HighLow The number to convert (or Int64HighLow to pass through).
 --- @return Int64HighLow pair The {high_32, low_32} pair.
 function bit64.from_number(value)
-  local low = value % 0x100000000
+  if bit64.is_int64(value) then
+    --- @cast value Int64HighLow
+    return value
+  end
+  --- @cast value -Int64HighLow
+  local low = math.floor(value % 0x100000000)
   local high = math.floor(value / 0x100000000)
   return bit64.new(high, low)
 end
@@ -1289,6 +1305,9 @@ bit64.lsl = bit64.lshift
 
 --- Alias for arshift (compatibility with older API).
 bit64.asr = bit64.arshift
+
+--- Alias for is_int64 (compatibility with older API).
+bit64.isInt64 = bit64.is_int64
 
 --------------------------------------------------------------------------------
 -- Self-test
@@ -1605,19 +1624,19 @@ function bit64.selftest()
     {
       name = "to_number({0x00000000, 0x00000001})",
       fn = bit64.to_number,
-      inputs = { { 0x00000000, 0x00000001 } },
+      inputs = { bit64.new(0x00000000, 0x00000001) },
       expected = 1,
     },
     {
       name = "to_number({0x00000000, 0xFFFFFFFF})",
       fn = bit64.to_number,
-      inputs = { { 0x00000000, 0xFFFFFFFF } },
+      inputs = { bit64.new(0x00000000, 0xFFFFFFFF) },
       expected = 4294967295,
     },
     {
       name = "to_number({0x00000001, 0x00000000})",
       fn = bit64.to_number,
-      inputs = { { 0x00000001, 0x00000000 } },
+      inputs = { bit64.new(0x00000001, 0x00000000) },
       expected = 4294967296,
     },
 
@@ -1655,13 +1674,13 @@ function bit64.selftest()
     {
       name = "to_number({0x001FFFFF, 0xFFFFFFFF}, true) -- max 53-bit",
       fn = bit64.to_number,
-      inputs = { { 0x001FFFFF, 0xFFFFFFFF }, true },
+      inputs = { bit64.new(0x001FFFFF, 0xFFFFFFFF), true },
       expected = 9007199254740991,
     },
     {
       name = "to_number({0, 1}, true)",
       fn = bit64.to_number,
-      inputs = { { 0, 1 }, true },
+      inputs = { bit64.new(0, 1), true },
       expected = 1,
     },
   }
@@ -1686,16 +1705,21 @@ function bit64.selftest()
         print("  PASS: " .. test.name)
         passed = passed + 1
       else
-        local exp_hex, got_hex = "", ""
-        for i = 1, #test.expected do
-          exp_hex = exp_hex .. string.format("%02X", string.byte(test.expected, i))
-        end
-        for i = 1, #result do
-          got_hex = got_hex .. string.format("%02X", string.byte(result, i))
-        end
         print("  FAIL: " .. test.name)
-        print("    Expected: " .. exp_hex)
-        print("    Got:      " .. got_hex)
+        if type(result) ~= "string" then
+          print("    Expected: string")
+          print("    Got:      " .. type(result))
+        else
+          local exp_hex, got_hex = "", ""
+          for i = 1, #test.expected do
+            exp_hex = exp_hex .. string.format("%02X", string.byte(test.expected, i))
+          end
+          for i = 1, #result do
+            got_hex = got_hex .. string.format("%02X", string.byte(result, i))
+          end
+          print("    Expected: " .. exp_hex)
+          print("    Got:      " .. got_hex)
+        end
       end
     else
       if result == test.expected then
@@ -1715,7 +1739,7 @@ function bit64.selftest()
   -- Test bit64.new() creates Int64 values
   total = total + 1
   local new_val = bit64.new(0x12345678, 0x9ABCDEF0)
-  if bit64.isInt64(new_val) and new_val[1] == 0x12345678 and new_val[2] == 0x9ABCDEF0 then
+  if bit64.is_int64(new_val) and new_val[1] == 0x12345678 and new_val[2] == 0x9ABCDEF0 then
     print("  PASS: new() creates Int64 with correct values")
     passed = passed + 1
   else
@@ -1725,30 +1749,30 @@ function bit64.selftest()
   -- Test bit64.new() with defaults
   total = total + 1
   local zero_val = bit64.new()
-  if bit64.isInt64(zero_val) and zero_val[1] == 0 and zero_val[2] == 0 then
+  if bit64.is_int64(zero_val) and zero_val[1] == 0 and zero_val[2] == 0 then
     print("  PASS: new() with no args creates {0, 0}")
     passed = passed + 1
   else
     print("  FAIL: new() with no args creates {0, 0}")
   end
 
-  -- Test isInt64() returns false for regular tables
+  -- Test is_int64() returns false for regular tables
   total = total + 1
   local plain_table = { 0x12345678, 0x9ABCDEF0 }
-  if not bit64.isInt64(plain_table) then
-    print("  PASS: isInt64() returns false for plain table")
+  if not bit64.is_int64(plain_table) then
+    print("  PASS: is_int64() returns false for plain table")
     passed = passed + 1
   else
-    print("  FAIL: isInt64() returns false for plain table")
+    print("  FAIL: is_int64() returns false for plain table")
   end
 
-  -- Test isInt64() returns false for non-tables
+  -- Test is_int64() returns false for non-tables
   total = total + 1
-  if not bit64.isInt64(123) and not bit64.isInt64("string") and not bit64.isInt64(nil) then
-    print("  PASS: isInt64() returns false for non-tables")
+  if not bit64.is_int64(123) and not bit64.is_int64("string") and not bit64.is_int64(nil) then
+    print("  PASS: is_int64() returns false for non-tables")
     passed = passed + 1
   else
-    print("  FAIL: isInt64() returns false for non-tables")
+    print("  FAIL: is_int64() returns false for non-tables")
   end
 
   -- Test all operations return Int64 values
@@ -1830,7 +1854,7 @@ function bit64.selftest()
   for _, op in ipairs(ops_returning_int64) do
     total = total + 1
     local result = op.fn()
-    if bit64.isInt64(result) then
+    if bit64.is_int64(result) then
       print("  PASS: " .. op.name .. "() returns Int64")
       passed = passed + 1
     else
@@ -1842,9 +1866,9 @@ function bit64.selftest()
   print("\nRunning to_number strict mode tests...")
   total = total + 1
   local ok, err = pcall(function()
-    bit64.to_number({ 0x00200000, 0x00000000 }, true) -- 2^53, exceeds 53-bit
+    bit64.to_number(bit64.new(0x00200000, 0x00000000), true) -- 2^53, exceeds 53-bit
   end)
-  if not ok and string.find(err, "53%-bit precision") then
+  if not ok and type(err) == "string" and string.find(err, "53%-bit precision") then
     print("  PASS: to_number strict mode errors on values > 53 bits")
     passed = passed + 1
   else
@@ -1892,7 +1916,7 @@ local bitn = {
 }
 
 --- Library version (injected at build time for releases).
-local VERSION = "v0.3.0"
+local VERSION = "v0.4.1"
 
 --- Get the library version string.
 --- @return string version Version string (e.g., "v1.0.0" or "dev")
