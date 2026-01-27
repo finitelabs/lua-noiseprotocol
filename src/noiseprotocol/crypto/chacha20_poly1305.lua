@@ -1,5 +1,6 @@
 --- @module "noiseprotocol.crypto.chacha20_poly1305"
 --- ChaCha20-Poly1305 Authenticated Encryption with Associated Data (AEAD) Implementation for portability.
+--- @class noiseprotocol.crypto.chacha20_poly1305
 local chacha20_poly1305 = {}
 
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
@@ -9,6 +10,12 @@ local benchmark_op = utils.benchmark.benchmark_op
 local chacha20 = require("noiseprotocol.crypto.chacha20")
 local poly1305 = require("noiseprotocol.crypto.poly1305")
 
+-- Local references for performance (avoid module table lookups in hot loops)
+local string_char = string.char
+local string_rep = string.rep
+local string_sub = string.sub
+local table_concat = table.concat
+
 --- Generate Poly1305 one-time key using ChaCha20
 --- @param key string 32-byte ChaCha20 key
 --- @param nonce string 12-byte nonce
@@ -16,7 +23,7 @@ local poly1305 = require("noiseprotocol.crypto.poly1305")
 local function poly1305_key_gen(key, nonce)
   -- Generate Poly1305 key by encrypting 32 zero bytes with ChaCha20
   -- Counter starts at 0 for key generation
-  local zero_block = string.rep("\0", 32)
+  local zero_block = string_rep("\0", 32)
   return chacha20.crypt(key, nonce, zero_block, 0)
 end
 
@@ -37,7 +44,7 @@ local function construct_aad_data(aad, ciphertext)
     bytes.u64_to_le_bytes(ciphertext_len),
   }
 
-  return table.concat(auth_parts)
+  return table_concat(auth_parts)
 end
 
 -- ============================================================================
@@ -119,8 +126,8 @@ function chacha20_poly1305.decrypt(key, nonce, ciphertext_and_tag, aad)
 
   -- Step 1: Split ciphertext and tag
   local ciphertext_len = #ciphertext_and_tag - 16
-  local ciphertext = string.sub(ciphertext_and_tag, 1, ciphertext_len)
-  local received_tag = string.sub(ciphertext_and_tag, ciphertext_len + 1)
+  local ciphertext = string_sub(ciphertext_and_tag, 1, ciphertext_len)
+  local received_tag = string_sub(ciphertext_and_tag, ciphertext_len + 1)
 
   local openssl = openssl_wrapper.get(openssl_wrapper.Feature.AAD)
   if openssl then
@@ -198,14 +205,14 @@ local test_vectors = {
   },
   {
     name = "Empty AAD roundtrip test",
-    key = string.char(0x42) .. string.rep("\0", 31),
-    nonce = string.rep("\0", 12),
+    key = string_char(0x42) .. string_rep("\0", 31),
+    nonce = string_rep("\0", 12),
     aad = "",
     plaintext = "No additional data",
   },
   {
     name = "Empty plaintext roundtrip test",
-    key = string.rep(string.char(0xff), 32),
+    key = string_rep(string_char(0xff), 32),
     nonce = bytes.from_hex("0102030405060708090a0b0c"),
     aad = "Only authenticating this data",
     plaintext = "",
@@ -311,8 +318,8 @@ function chacha20_poly1305.selftest()
 
     -- Test 1: Basic encryption/decryption
     total = total + 1
-    local key = string.rep(string.char(0x42), 32)
-    local nonce = string.rep("\0", 11) .. string.char(0x01)
+    local key = string_rep(string_char(0x42), 32)
+    local nonce = string_rep("\0", 11) .. string_char(0x01)
     local aad = "user@example.com|2024-01-01"
     local plaintext = "This is a secret message that needs both encryption and authentication."
 
@@ -328,7 +335,7 @@ function chacha20_poly1305.selftest()
 
     -- Test 2: Authentication tag tampering detection
     total = total + 1
-    local tampered = ciphertext_and_tag:sub(1, -2) .. string.char(255)
+    local tampered = ciphertext_and_tag:sub(1, -2) .. string_char(255)
     local tampered_result = chacha20_poly1305.decrypt(key, nonce, tampered, aad)
 
     if tampered_result == nil then
@@ -352,7 +359,7 @@ function chacha20_poly1305.selftest()
 
     -- Test 4: Nonce uniqueness
     total = total + 1
-    local nonce2 = string.rep("\0", 11) .. string.char(0x02)
+    local nonce2 = string_rep("\0", 11) .. string_char(0x02)
     local ciphertext2 = chacha20_poly1305.encrypt(key, nonce2, plaintext, aad)
 
     if ciphertext_and_tag ~= ciphertext2 then
@@ -388,7 +395,7 @@ function chacha20_poly1305.selftest()
 
     -- Test 7: Ciphertext tampering detection
     total = total + 1
-    local tampered_ct = string.char(255) .. ciphertext_and_tag:sub(2)
+    local tampered_ct = string_char(255) .. ciphertext_and_tag:sub(2)
     local tampered_ct_result = chacha20_poly1305.decrypt(key, nonce, tampered_ct, aad)
 
     if tampered_ct_result == nil then
@@ -418,9 +425,9 @@ function chacha20_poly1305.benchmark()
   local key = bytes.from_hex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f")
   local nonce = bytes.from_hex("070000004041424344454647")
   local aad = "Additional authenticated data"
-  local plaintext_64 = string.rep("a", 64)
-  local plaintext_1k = string.rep("a", 1024)
-  local plaintext_8k = string.rep("a", 8192)
+  local plaintext_64 = string_rep("a", 64)
+  local plaintext_1k = string_rep("a", 1024)
+  local plaintext_8k = string_rep("a", 8192)
 
   print("Authenticated Encryption Operations:")
   benchmark_op("encrypt_64_bytes", function()

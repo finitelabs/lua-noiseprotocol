@@ -1,12 +1,22 @@
 --- @module "noiseprotocol.crypto.poly1305"
 --- Poly1305 Message Authentication Code (MAC) Implementation for portability.
+--- @class noiseprotocol.crypto.poly1305
 local poly1305 = {}
 
-local bit32 = require("vendor.bitn").bit32
+local bit32 = require("bitn").bit32
 
 local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
+
+-- Local references for performance (avoid module table lookups in hot loops)
+local bit32_band = bit32.band
+local bit32_lshift = bit32.lshift
+local floor = math.floor
+local string_byte = string.byte
+local string_char = string.char
+local string_rep = string.rep
+local table_concat = table.concat
 
 -- Type definitions for better type checking
 
@@ -35,11 +45,11 @@ local function reduce_high_order_terms(prod, start_pos, end_pos)
       local reduction_multiplier = 5
 
       -- Calculate target byte position for the reduction
-      local target_byte = 1 + math.floor(excess_bits / 8)
+      local target_byte = 1 + floor(excess_bits / 8)
       local bit_offset = excess_bits % 8
 
       if bit_offset > 0 then
-        reduction_multiplier = bit32.lshift(reduction_multiplier, bit_offset)
+        reduction_multiplier = bit32_lshift(reduction_multiplier, bit_offset)
       end
 
       -- Add reduced value to target position
@@ -64,7 +74,7 @@ local function propagate_carries(h)
     assert(h[i] ~= nil, "Limb array must have at least 17 non-nil elements")
     carry = carry + h[i]
     h[i] = carry % 256
-    carry = math.floor(carry / 256)
+    carry = floor(carry / 256)
   end
   return carry
 end
@@ -93,7 +103,7 @@ end
 --- @param h Limb17Array Limb array (modified in place)
 local function reduce_position_17(h)
   while h[17] >= 4 do
-    local high_bits = math.floor(h[17] / 4)
+    local high_bits = floor(h[17] / 4)
     h[17] = h[17] % 4
 
     -- high_bits represents coefficient of 2^130, so multiply by 5
@@ -117,7 +127,7 @@ end
 
 --- Initialize a 33-element product array with zeros
 --- @return Limb33Array array Initialized array
-local function create_product_array()
+local function create_limb33_array()
   local arr = {}
   for i = 1, 33 do
     arr[i] = 0
@@ -125,6 +135,11 @@ local function create_product_array()
   --- @cast arr Limb33Array
   return arr
 end
+
+-- Pre-allocated arrays for authenticate() hot loop
+local auth_c = create_limb17_array() -- Message block array (17 elements)
+local auth_prod = create_limb33_array() -- Product array (33 elements)
+local auth_g = create_limb17_array() -- Final reduction array (17 elements)
 
 --- Initialize a 16-element key array
 --- @param source integer[] Source array to copy from
@@ -158,7 +173,7 @@ function poly1305.authenticate(key, msg)
   --- @type integer[]
   local key_bytes = {}
   for i = 1, #key do
-    key_bytes[i] = string.byte(key, i)
+    key_bytes[i] = string_byte(key, i)
   end
 
   -- Extract and clamp r (first 16 bytes) per RFC 7539
@@ -166,13 +181,13 @@ function poly1305.authenticate(key, msg)
 
   -- Apply RFC 7539 clamping to ensure r has specific bit patterns
   -- This prevents certain classes of attacks and ensures key validity
-  r[4] = bit32.band(r[4], 15) -- Clear top 4 bits of 4th byte
-  r[5] = bit32.band(r[5], 252) -- Clear bottom 2 bits of 5th byte
-  r[8] = bit32.band(r[8], 15) -- Clear top 4 bits of 8th byte
-  r[9] = bit32.band(r[9], 252) -- Clear bottom 2 bits of 9th byte
-  r[12] = bit32.band(r[12], 15) -- Clear top 4 bits of 12th byte
-  r[13] = bit32.band(r[13], 252) -- Clear bottom 2 bits of 13th byte
-  r[16] = bit32.band(r[16], 15) -- Clear top 4 bits of 16th byte
+  r[4] = bit32_band(r[4], 15) -- Clear top 4 bits of 4th byte
+  r[5] = bit32_band(r[5], 252) -- Clear bottom 2 bits of 5th byte
+  r[8] = bit32_band(r[8], 15) -- Clear top 4 bits of 8th byte
+  r[9] = bit32_band(r[9], 252) -- Clear bottom 2 bits of 9th byte
+  r[12] = bit32_band(r[12], 15) -- Clear top 4 bits of 12th byte
+  r[13] = bit32_band(r[13], 252) -- Clear bottom 2 bits of 13th byte
+  r[16] = bit32_band(r[16], 15) -- Clear top 4 bits of 16th byte
 
   -- Extract s (second 16 bytes) - used for final addition
   local s = create_key_array(key_bytes, 17)
@@ -183,12 +198,15 @@ function poly1305.authenticate(key, msg)
   local msglen = #msg
   local offset = 1
 
+  -- Reuse pre-allocated arrays for hot loop
+  local c = auth_c
+  local prod = auth_prod
+
   -- Process message in 16-byte blocks
   while msglen >= 16 do
-    -- Load current 16-byte block
-    local c = create_limb17_array()
+    -- Load current 16-byte block (reset and fill)
     for i = 1, 16 do
-      c[i] = string.byte(msg, offset + i - 1)
+      c[i] = string_byte(msg, offset + i - 1)
     end
     c[17] = 1 -- Add high bit (represents 2^128 for full blocks)
 
@@ -197,13 +215,15 @@ function poly1305.authenticate(key, msg)
     for i = 1, 17 do
       carry = carry + h[i] + c[i]
       h[i] = carry % 256
-      carry = math.floor(carry / 256)
+      carry = floor(carry / 256)
     end
 
     -- Multiply by r: h = (h * r) mod (2^130 - 5)
 
-    -- Step 1: Compute full precision product h * r
-    local prod = create_product_array()
+    -- Step 1: Compute full precision product h * r (reset prod first)
+    for i = 1, 33 do
+      prod[i] = 0
+    end
 
     for i = 1, 17 do
       for j = 1, 16 do
@@ -232,11 +252,14 @@ function poly1305.authenticate(key, msg)
 
   -- Process final partial block (if any)
   if msglen > 0 then
-    local c = create_limb17_array()
+    -- Reset c array for partial block
+    for i = 1, 17 do
+      c[i] = 0
+    end
 
     -- Load partial block
     for i = 1, msglen do
-      c[i] = string.byte(msg, offset + i - 1)
+      c[i] = string_byte(msg, offset + i - 1)
     end
     c[msglen + 1] = 1 -- Add padding bit at end of message
 
@@ -245,11 +268,13 @@ function poly1305.authenticate(key, msg)
     for i = 1, 17 do
       carry = carry + h[i] + c[i]
       h[i] = carry % 256
-      carry = math.floor(carry / 256)
+      carry = floor(carry / 256)
     end
 
-    -- Multiply by r
-    local prod = create_product_array()
+    -- Multiply by r (reset prod first)
+    for i = 1, 33 do
+      prod[i] = 0
+    end
 
     for i = 1, 17 do
       for j = 1, 16 do
@@ -271,14 +296,15 @@ function poly1305.authenticate(key, msg)
   -- Final reduction: conditionally subtract (2^130 - 5) if h >= 2^130 - 5
   -- This ensures the result is in canonical form
 
-  local g = create_limb17_array()
+  -- Reuse pre-allocated g array
+  local g = auth_g
   for i = 1, 17 do
     g[i] = h[i]
   end
 
   -- Test reduction by computing h + 5
   g[1] = g[1] + 5
-  local carry = math.floor(g[1] / 256)
+  local carry = floor(g[1] / 256)
   g[1] = g[1] % 256
 
   for i = 2, 17 do
@@ -287,7 +313,7 @@ function poly1305.authenticate(key, msg)
     end
     carry = carry + g[i]
     g[i] = carry % 256
-    carry = math.floor(carry / 256)
+    carry = floor(carry / 256)
   end
 
   -- Use mask-based selection for constant-time operation
@@ -303,37 +329,37 @@ function poly1305.authenticate(key, msg)
   carry = 0
   for i = 1, 16 do
     local sum = h[i] + s[i] + carry
-    result_bytes[i] = string.char(sum % 256)
-    carry = math.floor(sum / 256)
+    result_bytes[i] = string_char(sum % 256)
+    carry = floor(sum / 256)
   end
 
-  return table.concat(result_bytes)
+  return table_concat(result_bytes)
 end
 
 --- Test vectors from RFC 8439, RFC 7539, and other reference implementations
 local test_vectors = {
   {
     name = "RFC 8439 Test Vector #1 (all zeros)",
-    key = string.rep("\0", 32),
-    message = string.rep("\0", 64),
-    expected = string.rep("\0", 16),
+    key = string_rep("\0", 32),
+    message = string_rep("\0", 64),
+    expected = string_rep("\0", 16),
   },
   {
     name = "RFC 8439 Test Vector #2 (r=0, long message)",
-    key = string.rep("\0", 16) .. bytes.from_hex("36e5f6b5c5e06070f0efca96227a863e"),
+    key = string_rep("\0", 16) .. bytes.from_hex("36e5f6b5c5e06070f0efca96227a863e"),
     message = 'Any submission to the IETF intended by the Contributor for publication as all or part of an IETF Internet-Draft or RFC and any statement made within the context of an IETF activity is considered an "IETF Contribution". Such statements include oral statements in IETF sessions, as well as written and electronic communications made at any time or place, which are addressed to',
     expected = bytes.from_hex("36e5f6b5c5e06070f0efca96227a863e"),
   },
   {
     name = "RFC 8439 Test Vector #3 (r!=0, s=0)",
-    key = bytes.from_hex("36e5f6b5c5e06070f0efca96227a863e") .. string.rep("\0", 16),
+    key = bytes.from_hex("36e5f6b5c5e06070f0efca96227a863e") .. string_rep("\0", 16),
     message = 'Any submission to the IETF intended by the Contributor for publication as all or part of an IETF Internet-Draft or RFC and any statement made within the context of an IETF activity is considered an "IETF Contribution". Such statements include oral statements in IETF sessions, as well as written and electronic communications made at any time or place, which are addressed to',
     expected = bytes.from_hex("f3477e7cd95417af89a6b8794c310cf0"),
   },
   {
     name = "Wrap test vector (tests modular reduction edge case)",
     key = bytes.from_hex("0200000000000000000000000000000000000000000000000000000000000000"),
-    message = string.rep(string.char(255), 16),
+    message = string_rep(string_char(255), 16),
     expected = bytes.from_hex("03000000000000000000000000000000"),
   },
   {
@@ -375,11 +401,11 @@ function poly1305.selftest()
       local expected_hex = ""
 
       for j = 1, #result do
-        result_hex = result_hex .. string.format("%02x", string.byte(result, j))
+        result_hex = result_hex .. string.format("%02x", string_byte(result, j))
       end
 
       for j = 1, #test.expected do
-        expected_hex = expected_hex .. string.format("%02x", string.byte(test.expected, j))
+        expected_hex = expected_hex .. string.format("%02x", string_byte(test.expected, j))
       end
 
       if result == test.expected then
@@ -405,8 +431,8 @@ function poly1305.selftest()
 
     -- Test 1: Different keys produce different tags
     total = total + 1
-    local key1 = string.rep(string.char(0x42), 32)
-    local key2 = string.rep(string.char(0x43), 32)
+    local key1 = string_rep(string_char(0x42), 32)
+    local key2 = string_rep(string_char(0x43), 32)
     local message = "Test message for MAC verification"
 
     local tag1 = poly1305.authenticate(key1, message)
@@ -447,7 +473,7 @@ function poly1305.selftest()
 
     -- Test 4: Large message handling (multi-block)
     total = total + 1
-    local large_msg = string.rep("A", 256) -- 16 full blocks
+    local large_msg = string_rep("A", 256) -- 16 full blocks
     local large_tag = poly1305.authenticate(key1, large_msg)
 
     if #large_tag == 16 then
@@ -459,7 +485,7 @@ function poly1305.selftest()
 
     -- Test 5: Partial block handling
     total = total + 1
-    local partial_msg = string.rep("B", 33) -- 2 blocks + 1 byte
+    local partial_msg = string_rep("B", 33) -- 2 blocks + 1 byte
     local partial_tag = poly1305.authenticate(key1, partial_msg)
 
     if #partial_tag == 16 then
@@ -514,9 +540,9 @@ end
 function poly1305.benchmark()
   -- Test data
   local key = bytes.from_hex("85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b")
-  local message_64 = string.rep("a", 64)
-  local message_1k = string.rep("a", 1024)
-  local message_8k = string.rep("a", 8192)
+  local message_64 = string_rep("a", 64)
+  local message_1k = string_rep("a", 1024)
+  local message_8k = string_rep("a", 8192)
 
   print("MAC Operations:")
   benchmark_op("mac_64_bytes", function()

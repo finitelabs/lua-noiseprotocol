@@ -1,8 +1,9 @@
 --- @module "noiseprotocol.crypto.x25519"
 --- X25519 Curve25519 Elliptic Curve Diffie-Hellman Implementation for portability.
+--- @class noiseprotocol.crypto.x25519
 local x25519 = {}
 
-local bit32 = require("vendor.bitn").bit32
+local bit32 = require("bitn").bit32
 
 local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
@@ -12,18 +13,84 @@ local benchmark_op = utils.benchmark.benchmark_op
 -- CURVE25519 FIELD ARITHMETIC
 -- ============================================================================
 
+-- Local references for performance (avoid global table lookups in hot loops)
+local floor = math.floor
+local string_byte = string.byte
+local string_char = string.char
+local string_rep = string.rep
+local table_concat = table.concat
+
+--- @alias FieldElement integer[] 16-element array (indices 1-16) representing a field element
+--- @alias ProductArray integer[] 31-element array (indices 1-31) for multiplication products
+--- @alias ScalarArray integer[] 32-element array (indices 1-32) for scalar bytes
+
+--- Initialize a 16-element field element with zeros
+--- @return FieldElement fe Initialized field element
+local function create_field_element()
+  local arr = {}
+  for i = 1, 16 do
+    arr[i] = 0
+  end
+  return arr
+end
+
+--- Initialize a 31-element product array with zeros
+--- @return ProductArray arr Initialized array
+local function create_product_array()
+  local arr = {}
+  for i = 1, 31 do
+    arr[i] = 0
+  end
+  return arr
+end
+
+--- Initialize a 32-element scalar array with zeros
+--- @return ScalarArray arr Initialized array
+local function create_scalar_array()
+  local arr = {}
+  for i = 1, 32 do
+    arr[i] = 0
+  end
+  return arr
+end
+
+-- Pre-allocated constant for Montgomery ladder (a24 = 121665 = 0xdb41 + 1*0x10000)
+-- This is (A-2)/4 where A=486662 for Curve25519
+local A24 = { 0xdb41, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+
+-- Pre-allocated product array for mul() to avoid repeated allocation
+local mul_prod = create_product_array()
+
+-- Pre-allocated arrays for pack() to avoid repeated allocation
+local pack_t = create_field_element()
+local pack_m = create_field_element()
+
+-- Pre-allocated arrays for inv() to avoid repeated allocation
+local inv_c = create_field_element()
+
+-- Pre-allocated arrays for scalarmult() Montgomery ladder
+-- These are the most critical - 8 arrays created per DH operation
+local sm_a = create_field_element()
+local sm_b = create_field_element()
+local sm_c = create_field_element()
+local sm_d = create_field_element()
+local sm_e = create_field_element()
+local sm_f = create_field_element()
+local sm_x = create_field_element()
+local sm_clam = create_scalar_array()
+
 --- Carry operation for 64-bit arithmetic
 --- @param out integer[] Array to perform carry on
 local function carry(out)
-  for i = 0, 15 do
-    out[i] = out[i] + 0x10000
-    local c = out[i] / 0x10000 - (out[i] / 0x10000) % 1
-    if i < 15 then
+  for i = 1, 16 do
+    local v = out[i] + 0x10000
+    local c = floor(v * 0.0000152587890625) -- 1/0x10000 = 0.0000152587890625
+    if i < 16 then
       out[i + 1] = out[i + 1] + c - 1
     else
-      out[0] = out[0] + 38 * (c - 1)
+      out[1] = out[1] + 38 * (c - 1)
     end
-    out[i] = out[i] - c * 0x10000
+    out[i] = v - c * 0x10000
   end
 end
 
@@ -32,7 +99,7 @@ end
 --- @param b integer[] Second array
 --- @param bit integer Bit value (0 or 1)
 local function swap(a, b, bit)
-  for i = 0, 15 do
+  for i = 1, 16 do
     a[i], b[i] = a[i] * ((bit - 1) % 2) + b[i] * bit, b[i] * ((bit - 1) % 2) + a[i] * bit
   end
 end
@@ -41,39 +108,58 @@ end
 --- @param out integer[] Output limb array
 --- @param a integer[] Input byte array
 local function unpack(out, a)
-  for i = 0, 15 do
-    out[i] = a[2 * i] + a[2 * i + 1] * 0x100
+  for i = 1, 16 do
+    out[i] = a[2 * i - 1] + a[2 * i] * 0x100
   end
-  out[15] = out[15] % 0x8000
+  out[16] = out[16] % 0x8000
 end
+
+-- Pre-allocated prime constant for pack()
+local PRIME = {
+  0xffed,
+  0xffff,
+  0xffff,
+  0xffff,
+  0xffff,
+  0xffff,
+  0xffff,
+  0xffff,
+  0xffff,
+  0xffff,
+  0xffff,
+  0xffff,
+  0xffff,
+  0xffff,
+  0xffff,
+  0x7fff,
+}
 
 --- Pack limb array to byte array with modular reduction
 --- @param out integer[] Output byte array
 --- @param a integer[] Input limb array
 local function pack(out, a)
-  local t, m = {}, {}
-  for i = 0, 15 do
+  -- Reuse pre-allocated arrays
+  local t, m = pack_t, pack_m
+  for i = 1, 16 do
     t[i] = a[i]
   end
   carry(t)
   carry(t)
   carry(t)
-  local prime = { [0] = 0xffed, [15] = 0x7fff }
-  for i = 1, 14 do
-    prime[i] = 0xffff
-  end
-  for _ = 0, 1 do
-    m[0] = t[0] - prime[0]
-    for i = 1, 15 do
-      m[i] = t[i] - prime[i] - ((m[i - 1] / 0x10000 - (m[i - 1] / 0x10000) % 1) % 2)
-      m[i - 1] = (m[i - 1] + 0x10000) % 0x10000
+  for _ = 1, 2 do
+    m[1] = t[1] - PRIME[1]
+    for i = 2, 16 do
+      local prev = m[i - 1]
+      m[i] = t[i] - PRIME[i] - (floor(prev * 0.0000152587890625) % 2)
+      m[i - 1] = (prev + 0x10000) % 0x10000
     end
-    local c = (m[15] / 0x10000 - (m[15] / 0x10000) % 1) % 2
+    local c = floor(m[16] * 0.0000152587890625) % 2
     swap(t, m, 1 - c)
   end
-  for i = 0, 15 do
-    out[2 * i] = t[i] % 0x100
-    out[2 * i + 1] = t[i] / 0x100 - (t[i] / 0x100) % 1
+  for i = 1, 16 do
+    local ti = t[i]
+    out[2 * i - 1] = ti % 0x100
+    out[2 * i] = floor(ti * 0.00390625) -- 1/256
   end
 end
 
@@ -82,7 +168,7 @@ end
 --- @param a integer[] First input array
 --- @param b integer[] Second input array
 local function add(out, a, b)
-  for i = 0, 15 do
+  for i = 1, 16 do
     out[i] = a[i] + b[i]
   end
 end
@@ -92,7 +178,7 @@ end
 --- @param a integer[] First input array
 --- @param b integer[] Second input array
 local function sub(out, a, b)
-  for i = 0, 15 do
+  for i = 1, 16 do
     out[i] = a[i] - b[i]
   end
 end
@@ -102,19 +188,23 @@ end
 --- @param a integer[] First input array
 --- @param b integer[] Second input array
 local function mul(out, a, b)
-  local prod = {}
-  for i = 0, 31 do
+  -- Reuse pre-allocated array and clear it
+  local prod = mul_prod
+  for i = 1, 31 do
     prod[i] = 0
   end
-  for i = 0, 15 do
-    for j = 0, 15 do
-      prod[i + j] = prod[i + j] + a[i] * b[j]
+  -- Schoolbook multiplication
+  for i = 1, 16 do
+    local ai = a[i]
+    for j = 1, 16 do
+      prod[i + j - 1] = prod[i + j - 1] + ai * b[j]
     end
   end
-  for i = 0, 14 do
+  -- Reduce mod 2^255-19 (multiply high limbs by 38 and add to low)
+  for i = 1, 15 do
     prod[i] = prod[i] + 38 * prod[i + 16]
   end
-  for i = 0, 15 do
+  for i = 1, 16 do
     out[i] = prod[i]
   end
   carry(out)
@@ -125,8 +215,9 @@ end
 --- @param out integer[] Output array
 --- @param a integer[] Input array
 local function inv(out, a)
-  local c = {}
-  for i = 0, 15 do
+  -- Reuse pre-allocated array
+  local c = inv_c
+  for i = 1, 16 do
     c[i] = a[i]
   end
   for i = 253, 0, -1 do
@@ -135,7 +226,7 @@ local function inv(out, a)
       mul(c, c, a)
     end
   end
-  for i = 0, 15 do
+  for i = 1, 16 do
     out[i] = c[i]
   end
 end
@@ -145,19 +236,21 @@ end
 --- @param scalar integer[] Input scalar
 --- @param point integer[] Input point
 local function scalarmult(out, scalar, point)
-  local a, b, c, d, e, f, x, clam = {}, {}, {}, {}, {}, {}, {}, {}
+  -- Reuse pre-allocated arrays for Montgomery ladder state
+  local a, b, c, d, e, f, x, clam = sm_a, sm_b, sm_c, sm_d, sm_e, sm_f, sm_x, sm_clam
   unpack(x, point)
-  for i = 0, 15 do
+  for i = 1, 16 do
     a[i], b[i], c[i], d[i] = 0, x[i], 0, 0
   end
-  a[0], d[0] = 1, 1
-  for i = 0, 30 do
+  a[1], d[1] = 1, 1
+  for i = 1, 31 do
     clam[i] = scalar[i]
   end
-  clam[0] = clam[0] - (clam[0] % 8)
-  clam[31] = scalar[31] % 64 + 64
+  clam[1] = clam[1] - (clam[1] % 8)
+  clam[32] = scalar[32] % 64 + 64
   for i = 254, 0, -1 do
-    local byte_idx = math.floor(i / 8)
+    -- Optimized bit extraction
+    local byte_idx = floor(i * 0.125) + 1 -- i / 8 + 1
     local bit_idx = i % 8
     local bit = bit32.band(bit32.rshift(clam[byte_idx], bit_idx), 1)
     swap(a, b, bit)
@@ -174,7 +267,7 @@ local function scalarmult(out, scalar, point)
     sub(a, a, c)
     mul(b, a, a)
     sub(c, d, f)
-    mul(a, c, { [0] = 0xdb41, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 })
+    mul(a, c, A24) -- Use pre-allocated constant
     add(a, a, d)
     mul(c, c, a)
     mul(a, d, f)
@@ -194,7 +287,7 @@ end
 local function string_to_bytes(s)
   local b = {}
   for i = 1, #s do
-    b[i - 1] = string.byte(s, i)
+    b[i] = string_byte(s, i)
   end
   return b
 end
@@ -205,10 +298,10 @@ end
 --- @return string result Output string
 local function bytes_to_string(b, len)
   local result_bytes = {}
-  for i = 0, len - 1 do
-    result_bytes[i + 1] = string.char(b[i] or 0)
+  for i = 1, len do
+    result_bytes[i] = string_char(b[i] or 0)
   end
-  return table.concat(result_bytes)
+  return table_concat(result_bytes)
 end
 
 -- ============================================================================
@@ -225,9 +318,9 @@ function x25519.generate_private_key()
 
   local key_bytes = {}
   for i = 1, 32 do
-    key_bytes[i] = string.char(math.random(0, 255))
+    key_bytes[i] = string_char(math.random(0, 255))
   end
-  return table.concat(key_bytes)
+  return table_concat(key_bytes)
 end
 
 --- Derive public key from private key
@@ -238,8 +331,8 @@ function x25519.derive_public_key(private_key)
 
   local sk = string_to_bytes(private_key)
   local pk = {}
-  local base = { [0] = 9 }
-  for i = 1, 31 do
+  local base = { 9 }
+  for i = 2, 32 do
     base[i] = 0
   end
 
@@ -280,15 +373,15 @@ end
 local test_vectors = {
   {
     name = "RFC 7748 Test Vector 1",
-    scalar = utils.bytes.from_hex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4"),
-    u_coord = utils.bytes.from_hex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c"),
-    expected = utils.bytes.from_hex("c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552"),
+    scalar = bytes.from_hex("a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4"),
+    u_coord = bytes.from_hex("e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c"),
+    expected = bytes.from_hex("c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552"),
   },
   {
     name = "RFC 7748 Test Vector 2",
-    scalar = utils.bytes.from_hex("4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d"),
-    u_coord = utils.bytes.from_hex("e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493"),
-    expected = utils.bytes.from_hex("95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957"),
+    scalar = bytes.from_hex("4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d"),
+    u_coord = bytes.from_hex("e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493"),
+    expected = bytes.from_hex("95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957"),
   },
 }
 
@@ -320,10 +413,10 @@ function x25519.selftest()
         local result_hex = ""
         local expected_hex = ""
         for j = 1, #result do
-          result_hex = result_hex .. string.format("%02x", string.byte(result, j))
+          result_hex = result_hex .. string.format("%02x", string_byte(result, j))
         end
         for j = 1, #test.expected do
-          expected_hex = expected_hex .. string.format("%02x", string.byte(test.expected, j))
+          expected_hex = expected_hex .. string.format("%02x", string_byte(test.expected, j))
         end
         print("  Expected: " .. expected_hex)
         print("  Got:      " .. result_hex)
@@ -418,7 +511,7 @@ function x25519.selftest()
     -- Test 5: Edge case - all zero input (should not fail)
     total = total + 1
     success, err = pcall(function()
-      local zero_key = string.rep("\0", 32)
+      local zero_key = string_rep("\0", 32)
       local priv, _pub = x25519.generate_keypair()
 
       -- This should not crash, though result may be predictable

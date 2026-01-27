@@ -9,9 +9,10 @@
 --- - Field arithmetic modulo p = 2^448 - 2^224 - 1
 --- - Scalar multiplication on Curve448
 --- - Key generation and Diffie-Hellman operations
+--- @class noiseprotocol.crypto.x448
 local x448 = {}
 
-local bitn = require("vendor.bitn")
+local bitn = require("bitn")
 local band = bitn.bit32.band
 local bor = bitn.bit32.bor
 local bxor = bitn.bit32.bxor
@@ -23,6 +24,8 @@ local benchmark_op = utils.benchmark.benchmark_op
 local floor = math.floor
 local char = string.char
 local byte = string.byte
+local string_rep = string.rep
+local table_concat = table.concat
 
 -- Constants for X448 implementation
 -- Field prime p = 2^448 - 2^224 - 1 (Goldilocks prime)
@@ -331,7 +334,7 @@ local function cswap(swap, a, b)
 end
 
 --- Convert bytes to field element (little-endian)
---- @param bytes string 56-byte string
+--- @param b string 56-byte string
 --- @return table fe Field element
 local function fe_frombytes(b)
   local r = fe_zero()
@@ -356,7 +359,7 @@ local function fe_tobytes(a)
     b[i] = char(band(t[i] or 0, 0xFF))
   end
 
-  return table.concat(b)
+  return table_concat(b)
 end
 
 --- X448 scalar multiplication
@@ -456,7 +459,7 @@ function x448.derive_public_key(private_key)
   assert(#private_key == 56, "Private key must be exactly 56 bytes")
 
   -- Base point for X448 (u = 5)
-  local base = char(5) .. string.rep(char(0), 55)
+  local base = char(5) .. string_rep(char(0), 55)
 
   return x448_scalarmult(private_key, base)
 end
@@ -627,7 +630,7 @@ function x448.selftest()
     ok = pcall(function()
       -- Test with all-zero public key
       local private_key = x448.generate_private_key()
-      local zero_public = string.rep(char(0), 56)
+      local zero_public = string_rep(char(0), 56)
       local shared = x448.diffie_hellman(private_key, zero_public)
       assert(#shared == 56, "Should handle zero public key")
     end)

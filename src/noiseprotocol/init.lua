@@ -18,6 +18,7 @@
 ---   static_key = my_static_key
 --- })
 --- ...
+--- @class noiseprotocol
 local noiseprotocol = {}
 
 local crypto = require("noiseprotocol.crypto")
@@ -46,6 +47,15 @@ end
 -- PROTOCOL NAME PARSING
 -- ============================================================================
 
+--- Parsed protocol name components
+--- @class ParsedProtocolName
+--- @field pattern string Base handshake pattern (e.g., "XX", "IK", "NN")
+--- @field modifiers string[] List of modifier strings (e.g., {"psk0", "psk2"})
+--- @field dh string Diffie-Hellman function name (e.g., "25519", "448")
+--- @field cipher string Cipher name (e.g., "ChaChaPoly", "AESGCM")
+--- @field hash string Hash function name (e.g., "SHA256", "BLAKE2s")
+--- @field full_name string Original full protocol name
+
 --- Parse pattern and modifiers from the pattern portion
 --- @param pattern_str string Pattern with modifiers (e.g. "NNpsk0+psk2")
 --- @return string pattern Base pattern (e.g. "NN")
@@ -73,7 +83,7 @@ end
 
 --- Parse a Noise protocol name into its components
 --- @param protocol_name string Full protocol name (e.g. "Noise_NNpsk0+psk2_25519_AESGCM_SHA256")
---- @return table parsed Components: pattern, modifiers, dh, cipher, hash
+--- @return ParsedProtocolName parsed Parsed protocol components
 local function parse_protocol_name(protocol_name)
   -- Protocol name format: Noise_PATTERNmodifiers_DH_CIPHER_HASH
   local prefix, pattern_with_modifiers, dh, cipher, hash =
@@ -209,9 +219,8 @@ local function make_chachapoly_nonce(n)
   -- ChaCha20Poly1305 uses little-endian format: 4 zero bytes + 64-bit counter
   assert(n <= MAX_NONCE, "Nonce overflow")
   local nonce = string.rep("\0", 4) -- 4 zero bytes padding
-
-  -- Little-endian 64-bit counter
-  for _ = 0, 7 do
+  -- Little-endian 64-bit counter (8 bytes)
+  for _ = 1, 8 do
     nonce = nonce .. string.char(n % 256)
     n = math.floor(n / 256)
   end
@@ -624,6 +633,7 @@ end
 --- @param dh_output string Diffie-Hellman shared secret
 function SymmetricState:mix_key_and_hash(dh_output)
   local temp_h, temp_k
+  --- @type string, string, string
   self.ck, temp_h, temp_k = self.cipher_suite.hash.hkdf(self.ck, dh_output, 3)
   self:mix_hash(temp_h)
   -- Truncate temp_k if needed

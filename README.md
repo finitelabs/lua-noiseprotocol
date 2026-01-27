@@ -24,7 +24,7 @@ Download a pre-built single-file module from the
 
 - **`noiseprotocol.lua`** - Complete bundle with all dependencies included (zero
   external dependencies)
-- **`noiseprotocol-core.lua`** - Core library only, requires `vendor.bitn` to be
+- **`noiseprotocol-core.lua`** - Core library only, requires `bitn` to be
   installed separately
 
 ### Option 2: From Source
@@ -92,7 +92,7 @@ print("Handshake complete!")
 -- Print first 16 bytes of handshake hash as hex
 local utils = require("noiseprotocol.utils")
 local hash = alice:get_handshake_hash()
-print("Alice handshake hash:", bytes.to_hex(hash):sub(1, 32)) -- 32 hex chars = 16 bytes
+print("Alice handshake hash:", utils.bytes.to_hex(hash):sub(1, 32)) -- 32 hex chars = 16 bytes
 
 -- Transport phase - send encrypted messages
 local ciphertext1 = alice:send_message("Hello Bob!")
@@ -119,22 +119,57 @@ All one-way and interactive patterns from the Noise specification are supported:
 - **AEAD**: ChaChaPoly, AESGCM
 - **Hash**: SHA256, SHA512, BLAKE2s, BLAKE2b
 
-## Testing
+## Development
 
-Run the test suite:
+### Setup
 
 ```bash
-# Run all tests with default Lua interpreter
-./run_tests.sh
+# Install development dependencies (stylua, luacheck, amalg)
+make install-deps
+```
 
-# Run with specific Lua version
+### Testing
+
+```bash
+make test                # Run all tests
+make test-chacha20       # Run specific module tests
+make test-matrix         # Run tests across all Lua versions
+make test-matrix-x25519  # Run specific module across all Lua versions
+
+# Or use scripts directly with custom Lua binary
 LUA_BINARY=lua5.1 ./run_tests.sh
+```
 
-# Run specific modules
-./run_tests.sh chacha20 poly1305
+### Benchmarking
 
-# Run test matrix across all Lua versions
-./run_tests_matrix.sh
+```bash
+make bench               # Run all benchmarks
+make bench-x25519        # Run specific module benchmark
+
+# Or use scripts directly with custom Lua binary
+LUA_BINARY=luajit ./run_benchmarks.sh
+```
+
+### Code Quality
+
+```bash
+make check               # Run format check and lint
+make format              # Format code with stylua
+make format-check        # Check formatting without modifying
+make lint                # Run luacheck
+```
+
+### Building
+
+```bash
+make build               # Build single-file distributions (build/noiseprotocol.lua, build/noiseprotocol-core.lua)
+make clean               # Remove generated files
+```
+
+### Help
+
+```bash
+make help                # Show all available targets
 ```
 
 ## Current Limitations
@@ -142,10 +177,8 @@ LUA_BINARY=lua5.1 ./run_tests.sh
 - Pure Lua performance is slower than native implementations
 - No constant-time guarantees (not suitable for production use without
   additional hardening)
-
-## Future Plans
-
-- Performance optimizations for the pure Lua implementation
+- Not thread-safe for concurrent coroutines (uses pre-allocated arrays for
+  performance)
 
 ## Security Warning
 
@@ -162,7 +195,7 @@ native cryptographic libraries.
 
 ## License
 
-GNU Affero General Public License v3.0 - see LICENSE file for details
+GNU Affero General Public License v3.0 - see LICENSE file for details.
 
 ## Contributing
 

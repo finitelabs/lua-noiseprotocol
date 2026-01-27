@@ -1,13 +1,25 @@
 --- @module "noiseprotocol.crypto.chacha20"
 --- ChaCha20 Stream Cipher Implementation for portability.
+--- @class noiseprotocol.crypto.chacha20
 local chacha20 = {}
 
-local bit32 = require("vendor.bitn").bit32
+local bit32 = require("bitn").bit32
 
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
+
+-- Local references for performance (avoid module table lookups in hot loops)
+local bit32_add = bit32.add
+local bit32_bxor = bit32.bxor
+local bit32_rol = bit32.rol
+local floor = math.floor
+local min = math.min
+local string_byte = string.byte
+local string_char = string.char
+local string_rep = string.rep
+local table_concat = table.concat
 
 -- Type definitions for better type checking
 
@@ -41,16 +53,20 @@ local function create_word_array()
   return arr
 end
 
+-- Pre-allocated arrays for chacha20_block() to avoid repeated allocation
+local block_state = create_word_array()
+local block_working = create_word_array()
+
 --- Convert 32-bit word to 4 bytes (little-endian)
 --- @param word integer 32-bit word
 --- @return integer, integer, integer, integer bytes Four bytes in little-endian order
 local function word_to_bytes(word)
   local byte1 = word % 256
-  word = math.floor(word / 256)
+  word = floor(word * 0.00390625) -- / 256
   local byte2 = word % 256
-  word = math.floor(word / 256)
+  word = floor(word * 0.00390625)
   local byte3 = word % 256
-  word = math.floor(word / 256)
+  word = floor(word * 0.00390625)
   local byte4 = word % 256
 
   return byte1, byte2, byte3, byte4
@@ -73,30 +89,33 @@ end
 --- @param c integer Index of third word
 --- @param d integer Index of fourth word
 local function quarter_round(state, a, b, c, d)
-  state[a] = bit32.add(state[a], state[b])
-  state[d] = bit32.rol(bit32.bxor(state[d], state[a]), 16)
+  state[a] = bit32_add(state[a], state[b])
+  state[d] = bit32_rol(bit32_bxor(state[d], state[a]), 16)
 
-  state[c] = bit32.add(state[c], state[d])
-  state[b] = bit32.rol(bit32.bxor(state[b], state[c]), 12)
+  state[c] = bit32_add(state[c], state[d])
+  state[b] = bit32_rol(bit32_bxor(state[b], state[c]), 12)
 
-  state[a] = bit32.add(state[a], state[b])
-  state[d] = bit32.rol(bit32.bxor(state[d], state[a]), 8)
+  state[a] = bit32_add(state[a], state[b])
+  state[d] = bit32_rol(bit32_bxor(state[d], state[a]), 8)
 
-  state[c] = bit32.add(state[c], state[d])
-  state[b] = bit32.rol(bit32.bxor(state[b], state[c]), 7)
+  state[c] = bit32_add(state[c], state[d])
+  state[b] = bit32_rol(bit32_bxor(state[b], state[c]), 7)
 end
 
---- Initialize ChaCha20 state with key, nonce, and counter
+--- Generate one 64-byte block of ChaCha20 keystream
 --- @param key string 32-byte key
 --- @param nonce string 12-byte nonce
 --- @param counter integer 32-bit counter value
---- @return Word32Array state Initialized 16-word state
-local function chacha20_init(key, nonce, counter)
+--- @return string keystream 64-byte keystream block
+local function chacha20_block(key, nonce, counter)
+  -- Reuse pre-allocated arrays
+  local state = block_state
+  local working_state = block_working
+
+  -- Initialize state inline (avoiding function call overhead)
   assert(#key == 32, "Key must be exactly 32 bytes")
   assert(#nonce == 12, "Nonce must be exactly 12 bytes")
   assert(counter >= 0 and counter < 0x100000000, "Counter must be a valid 32-bit integer")
-
-  local state = create_word_array()
 
   -- ChaCha20 constants "expand 32-byte k"
   state[1] = 0x61707865 -- "expa"
@@ -108,10 +127,10 @@ local function chacha20_init(key, nonce, counter)
   for i = 1, 8 do
     local base = (i - 1) * 4
     state[4 + i] = bytes_to_word(
-      string.byte(key, base + 1),
-      string.byte(key, base + 2),
-      string.byte(key, base + 3),
-      string.byte(key, base + 4)
+      string_byte(key, base + 1),
+      string_byte(key, base + 2),
+      string_byte(key, base + 3),
+      string_byte(key, base + 4)
     )
   end
 
@@ -122,26 +141,14 @@ local function chacha20_init(key, nonce, counter)
   for i = 1, 3 do
     local base = (i - 1) * 4
     state[13 + i] = bytes_to_word(
-      string.byte(nonce, base + 1),
-      string.byte(nonce, base + 2),
-      string.byte(nonce, base + 3),
-      string.byte(nonce, base + 4)
+      string_byte(nonce, base + 1),
+      string_byte(nonce, base + 2),
+      string_byte(nonce, base + 3),
+      string_byte(nonce, base + 4)
     )
   end
 
-  return state
-end
-
---- Generate one 64-byte block of ChaCha20 keystream
---- @param key string 32-byte key
---- @param nonce string 12-byte nonce
---- @param counter integer 32-bit counter value
---- @return string keystream 64-byte keystream block
-local function chacha20_block(key, nonce, counter)
-  local state = chacha20_init(key, nonce, counter)
-
   -- Create working copy of state
-  local working_state = create_word_array()
   for i = 1, 16 do
     working_state[i] = state[i]
   end
@@ -163,17 +170,17 @@ local function chacha20_block(key, nonce, counter)
 
   -- Add original state to working state
   for i = 1, 16 do
-    working_state[i] = bit32.add(working_state[i], state[i])
+    working_state[i] = bit32_add(working_state[i], state[i])
   end
 
-  -- Convert state to byte string (little-endian) - optimized with table
+  -- Convert state to byte string (little-endian) - optimized with local references
   local result_bytes = {}
   for i = 1, 16 do
     local b1, b2, b3, b4 = word_to_bytes(working_state[i])
-    result_bytes[i] = string.char(b1, b2, b3, b4)
+    result_bytes[i] = string_char(b1, b2, b3, b4)
   end
 
-  return table.concat(result_bytes)
+  return table_concat(result_bytes)
 end
 
 --- ChaCha20 encryption/decryption (same operation)
@@ -194,12 +201,12 @@ function chacha20.crypt(key, nonce, plaintext, counter)
     -- Generate keystream block
     local keystream = chacha20_block(key, nonce, counter)
 
-    -- XOR with plaintext (optimized with table)
-    local block_size = math.min(64, data_len - offset + 1)
+    -- XOR with plaintext (optimized with local references)
+    local block_size = min(64, data_len - offset + 1)
     for i = 1, block_size do
-      local plaintext_byte = string.byte(plaintext, offset + i - 1)
-      local keystream_byte = string.byte(keystream, i)
-      result_bytes[result_idx] = string.char(bit32.bxor(plaintext_byte, keystream_byte))
+      local plaintext_byte = string_byte(plaintext, offset + i - 1)
+      local keystream_byte = string_byte(keystream, i)
+      result_bytes[result_idx] = string_char(bit32_bxor(plaintext_byte, keystream_byte))
       result_idx = result_idx + 1
     end
 
@@ -207,7 +214,7 @@ function chacha20.crypt(key, nonce, plaintext, counter)
     counter = counter + 1
   end
 
-  return table.concat(result_bytes)
+  return table_concat(result_bytes)
 end
 
 --- Convenience function for encryption (same as crypt)
@@ -221,7 +228,7 @@ function chacha20.encrypt(key, nonce, plaintext, counter)
   local openssl = openssl_wrapper.get()
   if openssl and #plaintext > 0 then
     -- Prepend 32-bit counter to 96-bit nonce for complete 128-bit nonce
-    nonce = utils.bytes.u32_to_le_bytes(counter or 1) .. nonce
+    nonce = bytes.u32_to_le_bytes(counter or 1) .. nonce
     return openssl.cipher.encrypt("chacha20", plaintext, key, nonce)
   end
   return chacha20.crypt(key, nonce, plaintext, counter)
@@ -238,7 +245,7 @@ function chacha20.decrypt(key, nonce, ciphertext, counter)
   local openssl = openssl_wrapper.get()
   if openssl and #ciphertext > 0 then
     -- Prepend 32-bit counter to 96-bit nonce for complete 128-bit nonce
-    nonce = utils.bytes.u32_to_le_bytes(counter or 1) .. nonce
+    nonce = bytes.u32_to_le_bytes(counter or 1) .. nonce
     return openssl.cipher.decrypt("chacha20", ciphertext, key, nonce)
   end
   return chacha20.crypt(key, nonce, ciphertext, counter)
@@ -278,10 +285,10 @@ local test_vectors = {
   },
   {
     name = "Zero key test",
-    key = string.rep("\0", 32),
-    nonce = string.rep("\0", 12),
+    key = string_rep("\0", 32),
+    nonce = string_rep("\0", 12),
     counter = 0,
-    plaintext = string.rep("\0", 64),
+    plaintext = string_rep("\0", 64),
     expected_ciphertext = bytes.from_hex(
       "76b8e0ada0f13d90405d6ae55386bd28bdd219b8a08ded1aa836efcc8b770dc7da41597c5157488d7724e03fb8d84a376a43b8f41518a11cc387b669b2ee6586"
     ),
@@ -322,11 +329,11 @@ function chacha20.selftest()
           -- Show first few bytes for debugging
           local expected_hex = ""
           local result_hex = ""
-          local show_bytes = math.min(16, #test.expected_keystream)
+          local show_bytes = min(16, #test.expected_keystream)
 
           for j = 1, show_bytes do
-            expected_hex = expected_hex .. string.format("%02x", string.byte(test.expected_keystream, j))
-            result_hex = result_hex .. string.format("%02x", string.byte(keystream, j))
+            expected_hex = expected_hex .. string.format("%02x", string_byte(assert(test.expected_keystream), j))
+            result_hex = result_hex .. string.format("%02x", string_byte(keystream, j))
           end
 
           print("  Expected (first " .. show_bytes .. " bytes): " .. expected_hex)
@@ -351,11 +358,11 @@ function chacha20.selftest()
           -- Show first few bytes for debugging
           local expected_hex = ""
           local result_hex = ""
-          local show_bytes = math.min(16, #test.expected_ciphertext)
+          local show_bytes = min(16, #test.expected_ciphertext)
 
           for j = 1, show_bytes do
-            expected_hex = expected_hex .. string.format("%02x", string.byte(test.expected_ciphertext, j))
-            result_hex = result_hex .. string.format("%02x", string.byte(result, j))
+            expected_hex = expected_hex .. string.format("%02x", string_byte(assert(test.expected_ciphertext), j))
+            result_hex = result_hex .. string.format("%02x", string_byte(result, j))
           end
 
           print("  Expected (first " .. show_bytes .. " bytes): " .. expected_hex)
@@ -379,8 +386,8 @@ function chacha20.selftest()
 
     -- Test 1: Basic encryption/decryption
     total = total + 1
-    local key = string.rep(string.char(0x42), 32)
-    local nonce = string.rep("\0", 12)
+    local key = string_rep(string_char(0x42), 32)
+    local nonce = string_rep("\0", 12)
     local counter = 1
     local plaintext = "Hello, ChaCha20! This is a test message for encryption."
 
@@ -407,7 +414,7 @@ function chacha20.selftest()
 
     -- Test 3: Different nonces produce different output
     total = total + 1
-    local nonce2 = string.char(0x01) .. string.rep("\0", 11)
+    local nonce2 = string_char(0x01) .. string_rep("\0", 11)
     local ciphertext3 = chacha20.encrypt(key, nonce2, plaintext, counter)
 
     if ciphertext ~= ciphertext3 then
@@ -442,7 +449,7 @@ function chacha20.selftest()
 
     -- Test 6: Large plaintext (multi-block)
     total = total + 1
-    local large_plaintext = string.rep("A", 256) -- 4 blocks
+    local large_plaintext = string_rep("A", 256) -- 4 blocks
     local large_ct = chacha20.encrypt(key, nonce, large_plaintext, counter)
     local large_pt = chacha20.decrypt(key, nonce, large_ct, counter)
 
@@ -455,7 +462,7 @@ function chacha20.selftest()
 
     -- Test 7: Partial block
     total = total + 1
-    local partial_plaintext = string.rep("B", 100) -- Not a multiple of 64
+    local partial_plaintext = string_rep("B", 100) -- Not a multiple of 64
     local partial_ct = chacha20.encrypt(key, nonce, partial_plaintext, counter)
     local partial_pt = chacha20.decrypt(key, nonce, partial_ct, counter)
 
@@ -485,9 +492,9 @@ function chacha20.benchmark()
   -- Test data
   local key = bytes.from_hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
   local nonce = bytes.from_hex("000000090000004a00000000")
-  local plaintext_64 = string.rep("a", 64)
-  local plaintext_1k = string.rep("a", 1024)
-  local plaintext_8k = string.rep("a", 8192)
+  local plaintext_64 = string_rep("a", 64)
+  local plaintext_1k = string_rep("a", 1024)
+  local plaintext_8k = string_rep("a", 8192)
 
   print("Encryption Operations:")
   benchmark_op("encrypt_64_bytes", function()

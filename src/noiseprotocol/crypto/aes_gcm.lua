@@ -1,13 +1,26 @@
 --- @module "noiseprotocol.crypto.aes_gcm"
 --- AES-GCM Authenticated Encryption with Associated Data (AEAD) Implementation for portability.
+--- @class noiseprotocol.crypto.aes_gcm
 local aes_gcm = {}
 
-local bit32 = require("vendor.bitn").bit32
+local bit32 = require("bitn").bit32
 
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
+
+-- Local references for performance (avoid module table lookups in hot loops)
+local bit32_band = bit32.band
+local bit32_bor = bit32.bor
+local bit32_bxor = bit32.bxor
+local bit32_lshift = bit32.lshift
+local bit32_rshift = bit32.rshift
+local string_byte = string.byte
+local string_char = string.char
+local string_rep = string.rep
+local string_sub = string.sub
+local table_concat = table.concat
 
 -- ============================================================================
 -- AES CORE IMPLEMENTATION
@@ -293,16 +306,63 @@ local RCON = {
 --- @alias AESGCMBlock [integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer, integer]
 --- @alias AESGCMState [AESGCMWord, AESGCMWord, AESGCMWord, AESGCMWord]
 
+--- Initialize a 16-element GCM block with zeros
+--- @return AESGCMBlock block Initialized block
+local function create_gcm_block()
+  local arr = {}
+  for i = 1, 16 do
+    arr[i] = 0
+  end
+  --- @cast arr AESGCMBlock
+  return arr
+end
+
+--- Initialize a 4x4 AES state array with zeros
+--- @return AESGCMState state Initialized state
+local function create_aes_state()
+  local state = {}
+  for i = 1, 4 do
+    state[i] = {}
+    for j = 1, 4 do
+      state[i][j] = 0
+    end
+  end
+  --- @cast state AESGCMState
+  return state
+end
+
+--- Initialize a 4-element AES word with zeros
+--- @return AESGCMWord word Initialized word
+local function create_aes_word()
+  local arr = {}
+  for i = 1, 4 do
+    arr[i] = 0
+  end
+  --- @cast arr AESGCMWord
+  return arr
+end
+
+-- Pre-allocated arrays for gcm_multiply() to avoid repeated allocation
+local gcm_z = create_gcm_block()
+local gcm_v = create_gcm_block()
+
+-- Pre-allocated state array for aes_encrypt_block()
+local aes_state = create_aes_state()
+
+-- Pre-allocated arrays for mix_columns()
+local mix_a = create_aes_word()
+local mix_b = create_aes_word()
+
 --- XOR two 4-byte words
 --- @param a AESGCMWord 4-byte array
 --- @param b AESGCMWord 4-byte array
 --- @return table Word 4-byte array
 local function xor_words(a, b)
   return {
-    bit32.bxor(a[1], b[1]),
-    bit32.bxor(a[2], b[2]),
-    bit32.bxor(a[3], b[3]),
-    bit32.bxor(a[4], b[4]),
+    bit32_bxor(a[1], b[1]),
+    bit32_bxor(a[2], b[2]),
+    bit32_bxor(a[3], b[3]),
+    bit32_bxor(a[4], b[4]),
   }
 end
 
@@ -347,24 +407,25 @@ local function key_expansion(key)
   end
 
   -- Convert key to words
-  --- @type AESGCMWord
+  --- @type AESGCMState
   local w = {}
-  for i = 0, nk - 1 do
+  for i = 1, nk do
     w[i] = {
-      string.byte(key, i * 4 + 1),
-      string.byte(key, i * 4 + 2),
-      string.byte(key, i * 4 + 3),
-      string.byte(key, i * 4 + 4),
+      string_byte(key, (i - 1) * 4 + 1),
+      string_byte(key, (i - 1) * 4 + 2),
+      string_byte(key, (i - 1) * 4 + 3),
+      string_byte(key, (i - 1) * 4 + 4),
     }
   end
 
   -- Expand key
-  for i = nk, 4 * (nr + 1) - 1 do
+  for i = nk + 1, 4 * (nr + 1) do
     local temp = w[i - 1]
-    if i % nk == 0 then
-      local t = assert(RCON[i / nk], "Invalid RCON index " .. (i / nk))
+    local idx = i - 1 -- 0-based index for modulo arithmetic
+    if idx % nk == 0 then
+      local t = assert(RCON[idx / nk], "Invalid RCON index " .. (idx / nk))
       temp = xor_words(sub_word(rot_word(temp)), { t, 0, 0, 0 })
-    elseif nk > 6 and i % nk == 4 then
+    elseif nk > 6 and idx % nk == 4 then
       temp = sub_word(temp)
     end
     w[i] = xor_words(w[i - nk], temp)
@@ -376,29 +437,28 @@ end
 --- MixColumns transformation
 --- @param state AESGCMState 4x4 state matrix
 local function mix_columns(state)
-  for c = 0, 3 do
-    --- @type AESGCMWord
-    local a = {}
-    --- @type AESGCMWord
-    local b = {}
-    for i = 0, 3 do
+  -- Reuse pre-allocated arrays
+  local a = mix_a
+  local b = mix_b
+  for c = 1, 4 do
+    for i = 1, 4 do
       a[i] = state[i][c]
-      b[i] = bit32.band(state[i][c], 0x80) ~= 0 and bit32.bxor(bit32.band(bit32.lshift(state[i][c], 1), 0xFF), 0x1B)
-        or bit32.band(bit32.lshift(state[i][c], 1), 0xFF)
+      b[i] = bit32_band(state[i][c], 0x80) ~= 0 and bit32_bxor(bit32_band(bit32_lshift(state[i][c], 1), 0xFF), 0x1B)
+        or bit32_band(bit32_lshift(state[i][c], 1), 0xFF)
     end
 
-    state[0][c] = bit32.bxor(bit32.bxor(bit32.bxor(b[0], a[1]), bit32.bxor(b[1], a[2])), a[3])
-    state[1][c] = bit32.bxor(bit32.bxor(bit32.bxor(a[0], b[1]), bit32.bxor(a[2], b[2])), a[3])
-    state[2][c] = bit32.bxor(bit32.bxor(bit32.bxor(a[0], a[1]), bit32.bxor(b[2], a[3])), b[3])
-    state[3][c] = bit32.bxor(bit32.bxor(bit32.bxor(a[0], b[0]), bit32.bxor(a[1], a[2])), b[3])
+    state[1][c] = bit32_bxor(bit32_bxor(bit32_bxor(b[1], a[2]), bit32_bxor(b[2], a[3])), a[4])
+    state[2][c] = bit32_bxor(bit32_bxor(bit32_bxor(a[1], b[2]), bit32_bxor(a[3], b[3])), a[4])
+    state[3][c] = bit32_bxor(bit32_bxor(bit32_bxor(a[1], a[2]), bit32_bxor(b[3], a[4])), b[4])
+    state[4][c] = bit32_bxor(bit32_bxor(bit32_bxor(a[1], b[1]), bit32_bxor(a[2], a[3])), b[4])
   end
 end
 
 --- SubBytes transformation
 --- @param state AESGCMState 4x4 state matrix
 local function sub_bytes(state)
-  for i = 0, 3 do
-    for j = 0, 3 do
+  for i = 1, 4 do
+    for j = 1, 4 do
       local s_index = state[i][j] + 1
       state[i][j] = assert(SBOX[s_index], "Invalid SBOX index " .. s_index)
     end
@@ -408,28 +468,28 @@ end
 --- ShiftRows transformation
 --- @param state AESGCMState 4x4 state matrix
 local function shift_rows(state)
-  -- Row 0: no shift
-  -- Row 1: shift left by 1
-  local temp = state[1][0]
-  state[1][0] = state[1][1]
-  state[1][1] = state[1][2]
-  state[1][2] = state[1][3]
-  state[1][3] = temp
+  -- Row 1: no shift
+  -- Row 2: shift left by 1
+  local temp = state[2][1]
+  state[2][1] = state[2][2]
+  state[2][2] = state[2][3]
+  state[2][3] = state[2][4]
+  state[2][4] = temp
 
-  -- Row 2: shift left by 2
-  temp = state[2][0]
-  state[2][0] = state[2][2]
-  state[2][2] = temp
-  temp = state[2][1]
-  state[2][1] = state[2][3]
-  state[2][3] = temp
+  -- Row 3: shift left by 2
+  temp = state[3][1]
+  state[3][1] = state[3][3]
+  state[3][3] = temp
+  temp = state[3][2]
+  state[3][2] = state[3][4]
+  state[3][4] = temp
 
-  -- Row 3: shift left by 3 (or right by 1)
-  temp = state[3][3]
-  state[3][3] = state[3][2]
-  state[3][2] = state[3][1]
-  state[3][1] = state[3][0]
-  state[3][0] = temp
+  -- Row 4: shift left by 3 (or right by 1)
+  temp = state[4][4]
+  state[4][4] = state[4][3]
+  state[4][3] = state[4][2]
+  state[4][2] = state[4][1]
+  state[4][1] = temp
 end
 
 --- AddRoundKey transformation
@@ -437,10 +497,10 @@ end
 --- @param round_key table Round key words
 --- @param round integer Round number
 local function add_round_key(state, round_key, round)
-  for c = 0, 3 do
+  for c = 1, 4 do
     local key_word = round_key[round * 4 + c]
-    for r = 0, 3 do
-      state[r][c] = bit32.bxor(state[r][c], key_word[r + 1])
+    for r = 1, 4 do
+      state[r][c] = bit32_bxor(state[r][c], key_word[r])
     end
   end
 end
@@ -451,14 +511,11 @@ end
 --- @param nr integer Number of rounds
 --- @return string ciphertext 16-byte encrypted block
 local function aes_encrypt_block(input, expanded_key, nr)
-  -- Initialize state from input
-  --- @type AESGCMState
-  local state = {}
-  for i = 0, 3 do
-    --- @type AESGCMWord
-    state[i] = {}
-    for j = 0, 3 do
-      state[i][j] = string.byte(input, j * 4 + i + 1)
+  -- Reuse pre-allocated state array
+  local state = aes_state
+  for i = 1, 4 do
+    for j = 1, 4 do
+      state[i][j] = string_byte(input, (j - 1) * 4 + i)
     end
   end
 
@@ -481,14 +538,14 @@ local function aes_encrypt_block(input, expanded_key, nr)
   -- Convert state to output (optimized with table)
   local output_bytes = {}
   local idx = 1
-  for j = 0, 3 do
-    for i = 0, 3 do
-      output_bytes[idx] = string.char(state[i][j])
+  for j = 1, 4 do
+    for i = 1, 4 do
+      output_bytes[idx] = string_char(state[i][j])
       idx = idx + 1
     end
   end
 
-  return table.concat(output_bytes)
+  return table_concat(output_bytes)
 end
 
 -- ============================================================================
@@ -500,40 +557,40 @@ end
 --- @param y string 16-byte block
 --- @return string result Product in GF(2^128)
 local function gcm_multiply(x, y)
-  -- Convert to bit arrays for easier manipulation
-  --- @type AESGCMBlock
-  local z = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
-  --- @type AESGCMBlock
-  local v = {}
+  -- Reuse pre-allocated arrays
+  local z = gcm_z
+  local v = gcm_v
+  -- Reset z and initialize v
   for i = 1, 16 do
-    v[i] = string.byte(y, i)
+    z[i] = 0
+    v[i] = string_byte(y, i)
   end
 
   -- Process each bit of x from MSB to LSB
   for i = 1, 16 do
-    local byte = string.byte(x, i)
+    local byte = string_byte(x, i)
     for bit = 7, 0, -1 do
-      if bit32.band(byte, bit32.lshift(1, bit)) ~= 0 then
+      if bit32_band(byte, bit32_lshift(1, bit)) ~= 0 then
         -- z = z XOR v
         for j = 1, 16 do
-          z[j] = bit32.bxor(z[j], v[j])
+          z[j] = bit32_bxor(z[j], v[j])
         end
       end
 
       -- Check if LSB of v is 1 (bit 0 of last byte)
-      local lsb = bit32.band(v[16], 1)
+      local lsb = bit32_band(v[16], 1)
 
       -- v = v >> 1 (right shift entire 128-bit value by 1)
       local carry = 0
       for j = 1, 16 do
-        local new_carry = bit32.band(v[j], 1)
-        v[j] = bit32.bor(bit32.rshift(v[j], 1), bit32.lshift(carry, 7))
+        local new_carry = bit32_band(v[j], 1)
+        v[j] = bit32_bor(bit32_rshift(v[j], 1), bit32_lshift(carry, 7))
         carry = new_carry
       end
 
       -- If LSB was 1, XOR with R = 0xE1000000000000000000000000000000
       if lsb ~= 0 then
-        v[1] = bit32.bxor(v[1], 0xE1)
+        v[1] = bit32_bxor(v[1], 0xE1)
       end
     end
   end
@@ -541,7 +598,7 @@ local function gcm_multiply(x, y)
   -- Convert result back to string
   local result = ""
   for i = 1, 16 do
-    result = result .. string.char(z[i])
+    result = result .. string_char(z[i])
   end
   return result
 end
@@ -551,16 +608,16 @@ end
 --- @param data string Data to hash (multiple of 16 bytes)
 --- @return string result 16-byte hash
 local function ghash(h, data)
-  local y = string.rep("\0", 16)
+  local y = string_rep("\0", 16)
 
   -- Process each 16-byte block
   for i = 1, #data, 16 do
-    local block = string.sub(data, i, i + 15)
+    local block = string_sub(data, i, i + 15)
 
     -- y = (y XOR block) * h
     local y_xor = ""
     for j = 1, 16 do
-      y_xor = y_xor .. string.char(bit32.bxor(string.byte(y, j), string.byte(block, j)))
+      y_xor = y_xor .. string_char(bit32_bxor(string_byte(y, j), string_byte(block, j)))
     end
 
     y = gcm_multiply(y_xor, h)
@@ -573,19 +630,19 @@ end
 --- @param counter string 16-byte counter block
 --- @return string result Incremented counter
 local function inc_counter(counter)
-  local result = string.sub(counter, 1, 12) -- Keep first 12 bytes
+  local result = string_sub(counter, 1, 12) -- Keep first 12 bytes
 
   -- Increment last 4 bytes (big-endian)
   local val = 0
   for i = 13, 16 do
-    val = val * 256 + string.byte(counter, i)
+    val = val * 256 + string_byte(counter, i)
   end
 
   val = (val + 1) % 0x100000000
 
   -- Convert back to bytes (big-endian)
   for i = 3, 0, -1 do
-    result = result .. string.char(bit32.band(bit32.rshift(val, i * 8), 0xFF))
+    result = result .. string_char(bit32_band(bit32_rshift(val, i * 8), 0xFF))
   end
 
   return result
@@ -602,7 +659,7 @@ local function generate_keystream(key, iv, length)
   local total_length = 0
 
   -- Initial counter value: IV || 0x00000002
-  local counter = iv .. string.rep("\0", 3) .. string.char(0x02)
+  local counter = iv .. string_rep("\0", 3) .. string_char(0x02)
 
   while total_length < length do
     local block = aes_encrypt_block(counter, expanded_key, nr)
@@ -611,8 +668,8 @@ local function generate_keystream(key, iv, length)
     counter = inc_counter(counter)
   end
 
-  local keystream = table.concat(keystream_blocks)
-  return string.sub(keystream, 1, length)
+  local keystream = table_concat(keystream_blocks)
+  return string_sub(keystream, 1, length)
 end
 
 -- ============================================================================
@@ -629,12 +686,12 @@ local function format_gcm_data(aad, ciphertext)
   -- Add AAD and padding
   result = result .. aad
   local aad_pad = (16 - (#aad % 16)) % 16
-  result = result .. string.rep("\0", aad_pad)
+  result = result .. string_rep("\0", aad_pad)
 
   -- Add ciphertext and padding
   result = result .. ciphertext
   local ct_pad = (16 - (#ciphertext % 16)) % 16
-  result = result .. string.rep("\0", ct_pad)
+  result = result .. string_rep("\0", ct_pad)
 
   -- Add lengths (in bits) as 64-bit big-endian integers
   -- For messages under 2^61 bytes, high 32 bits are always 0
@@ -642,11 +699,11 @@ local function format_gcm_data(aad, ciphertext)
   local ct_bits_low = #ciphertext * 8
 
   -- AAD length (64 bits big-endian)
-  result = result .. string.rep("\0", 4) -- High 32 bits
+  result = result .. string_rep("\0", 4) -- High 32 bits
   result = result .. bytes.u32_to_be_bytes(aad_bits_low) -- Low 32 bits
 
   -- Ciphertext length (64 bits big-endian)
-  result = result .. string.rep("\0", 4) -- High 32 bits
+  result = result .. string_rep("\0", 4) -- High 32 bits
   result = result .. bytes.u32_to_be_bytes(ct_bits_low) -- Low 32 bits
 
   return result
@@ -696,16 +753,16 @@ function aes_gcm.encrypt(key, nonce, plaintext, aad)
   local expanded_key, nr = key_expansion(key)
 
   -- Generate hash key H = E(K, 0^128)
-  local h = aes_encrypt_block(string.rep("\0", 16), expanded_key, nr)
+  local h = aes_encrypt_block(string_rep("\0", 16), expanded_key, nr)
 
   -- Initial counter: nonce || 0x00000001
-  local j0 = nonce .. string.rep("\0", 3) .. string.char(0x01)
+  local j0 = nonce .. string_rep("\0", 3) .. string_char(0x01)
 
   -- Encrypt plaintext using CTR mode
   local keystream = generate_keystream(key, nonce, #plaintext)
   local ciphertext = ""
   for i = 1, #plaintext do
-    ciphertext = ciphertext .. string.char(bit32.bxor(string.byte(plaintext, i), string.byte(keystream, i)))
+    ciphertext = ciphertext .. string_char(bit32_bxor(string_byte(plaintext, i), string_byte(keystream, i)))
   end
 
   -- Calculate authentication tag
@@ -716,7 +773,7 @@ function aes_gcm.encrypt(key, nonce, plaintext, aad)
   local encrypted_j0 = aes_encrypt_block(j0, expanded_key, nr)
   local tag = ""
   for i = 1, 16 do
-    tag = tag .. string.char(bit32.bxor(string.byte(s, i), string.byte(encrypted_j0, i)))
+    tag = tag .. string_char(bit32_bxor(string_byte(s, i), string_byte(encrypted_j0, i)))
   end
 
   return ciphertext .. tag
@@ -741,8 +798,8 @@ function aes_gcm.decrypt(key, nonce, ciphertext_and_tag, aad)
 
   -- Split ciphertext and tag
   local ciphertext_len = #ciphertext_and_tag - 16
-  local ciphertext = string.sub(ciphertext_and_tag, 1, ciphertext_len)
-  local received_tag = string.sub(ciphertext_and_tag, ciphertext_len + 1)
+  local ciphertext = string_sub(ciphertext_and_tag, 1, ciphertext_len)
+  local received_tag = string_sub(ciphertext_and_tag, ciphertext_len + 1)
 
   local openssl = openssl_wrapper.get(openssl_wrapper.Feature.AAD)
   if openssl then
@@ -771,10 +828,10 @@ function aes_gcm.decrypt(key, nonce, ciphertext_and_tag, aad)
   local expanded_key, nr = key_expansion(key)
 
   -- Generate hash key H = E(K, 0^128)
-  local h = aes_encrypt_block(string.rep("\0", 16), expanded_key, nr)
+  local h = aes_encrypt_block(string_rep("\0", 16), expanded_key, nr)
 
   -- Initial counter: nonce || 0x00000001
-  local j0 = nonce .. string.rep("\0", 3) .. string.char(0x01)
+  local j0 = nonce .. string_rep("\0", 3) .. string_char(0x01)
 
   -- Calculate expected authentication tag
   local gcm_data = format_gcm_data(aad, ciphertext)
@@ -784,7 +841,7 @@ function aes_gcm.decrypt(key, nonce, ciphertext_and_tag, aad)
   local encrypted_j0 = aes_encrypt_block(j0, expanded_key, nr)
   local expected_tag = ""
   for i = 1, 16 do
-    expected_tag = expected_tag .. string.char(bit32.bxor(string.byte(s, i), string.byte(encrypted_j0, i)))
+    expected_tag = expected_tag .. string_char(bit32_bxor(string_byte(s, i), string_byte(encrypted_j0, i)))
   end
 
   -- Verify tag (constant-time comparison)
@@ -796,7 +853,7 @@ function aes_gcm.decrypt(key, nonce, ciphertext_and_tag, aad)
   local keystream = generate_keystream(key, nonce, #ciphertext)
   local plaintext = ""
   for i = 1, #ciphertext do
-    plaintext = plaintext .. string.char(bit32.bxor(string.byte(ciphertext, i), string.byte(keystream, i)))
+    plaintext = plaintext .. string_char(bit32_bxor(string_byte(ciphertext, i), string_byte(keystream, i)))
   end
 
   return plaintext
@@ -806,8 +863,8 @@ end
 local test_vectors = {
   {
     name = "NIST Test Case 1 (AES-128-GCM)",
-    key = string.rep("\0", 16),
-    nonce = string.rep("\0", 12),
+    key = string_rep("\0", 16),
+    nonce = string_rep("\0", 12),
     plaintext = "",
     aad = "",
     ciphertext = "",
@@ -815,9 +872,9 @@ local test_vectors = {
   },
   {
     name = "NIST Test Case 2 (AES-128-GCM)",
-    key = string.rep("\0", 16),
-    nonce = string.rep("\0", 12),
-    plaintext = string.rep("\0", 16),
+    key = string_rep("\0", 16),
+    nonce = string_rep("\0", 12),
+    plaintext = string_rep("\0", 16),
     aad = "",
     ciphertext = bytes.from_hex("0388dace60b6a392f328c2b971b2fe78"),
     tag = bytes.from_hex("ab6e47d42cec13bdf53a67b21257bddf"),
@@ -858,8 +915,8 @@ function aes_gcm.selftest()
       if test.ciphertext then
         -- Test with known ciphertext and tag
         local result = aes_gcm.encrypt(test.key, test.nonce, test.plaintext, test.aad)
-        local result_ct = string.sub(result, 1, #test.ciphertext)
-        local result_tag = string.sub(result, #test.ciphertext + 1)
+        local result_ct = string_sub(result, 1, #test.ciphertext)
+        local result_tag = string_sub(result, #test.ciphertext + 1)
 
         if result_ct == test.ciphertext and result_tag == test.tag then
           print("  ✅ PASS: Encryption")
@@ -878,7 +935,7 @@ function aes_gcm.selftest()
           print("  ❌ FAIL: Encryption")
           print("    Expected CT: " .. bytes.to_hex(test.ciphertext))
           print("    Got CT:      " .. bytes.to_hex(result_ct))
-          print("    Expected Tag: " .. bytes.to_hex(test.tag))
+          print("    Expected Tag: " .. (test.tag and bytes.to_hex(test.tag) or "none"))
           print("    Got Tag:      " .. bytes.to_hex(result_tag))
         end
       else
@@ -908,8 +965,8 @@ function aes_gcm.selftest()
 
     -- Test 1: Basic encryption/decryption with AES-128
     total = total + 1
-    local key128 = string.rep(string.char(0x42), 16)
-    local nonce = string.rep("\0", 11) .. string.char(0x01)
+    local key128 = string_rep(string_char(0x42), 16)
+    local nonce = string_rep("\0", 11) .. string_char(0x01)
     local aad = "user@example.com|2024-01-01"
     local plaintext = "This is a secret message that needs both encryption and authentication."
 
@@ -925,7 +982,7 @@ function aes_gcm.selftest()
 
     -- Test 2: Basic encryption/decryption with AES-256
     total = total + 1
-    local key256 = string.rep(string.char(0x43), 32)
+    local key256 = string_rep(string_char(0x43), 32)
     local ct256 = aes_gcm.encrypt(key256, nonce, plaintext, aad)
     local pt256 = aes_gcm.decrypt(key256, nonce, ct256, aad)
 
@@ -938,7 +995,7 @@ function aes_gcm.selftest()
 
     -- Test 3: Authentication tag tampering detection
     total = total + 1
-    local tampered = ciphertext_and_tag:sub(1, -2) .. string.char(255)
+    local tampered = ciphertext_and_tag:sub(1, -2) .. string_char(255)
     local tampered_result = aes_gcm.decrypt(key128, nonce, tampered, aad)
 
     if tampered_result == nil then
@@ -962,7 +1019,7 @@ function aes_gcm.selftest()
 
     -- Test 5: Nonce uniqueness
     total = total + 1
-    local nonce2 = string.rep("\0", 11) .. string.char(0x02)
+    local nonce2 = string_rep("\0", 11) .. string_char(0x02)
     local ciphertext2 = aes_gcm.encrypt(key128, nonce2, plaintext, aad)
 
     if ciphertext_and_tag ~= ciphertext2 then
@@ -998,7 +1055,7 @@ function aes_gcm.selftest()
 
     -- Test 8: Ciphertext tampering detection
     total = total + 1
-    local tampered_ct = string.char(255) .. ciphertext_and_tag:sub(2)
+    local tampered_ct = string_char(255) .. ciphertext_and_tag:sub(2)
     local tampered_ct_result = aes_gcm.decrypt(key128, nonce, tampered_ct, aad)
 
     if tampered_ct_result == nil then
@@ -1010,7 +1067,7 @@ function aes_gcm.selftest()
 
     -- Test 9: Wrong key detection
     total = total + 1
-    local wrong_key = string.rep(string.char(0x99), 16)
+    local wrong_key = string_rep(string_char(0x99), 16)
     local wrong_key_result = aes_gcm.decrypt(wrong_key, nonce, ciphertext_and_tag, aad)
 
     if wrong_key_result == nil then
@@ -1022,7 +1079,7 @@ function aes_gcm.selftest()
 
     -- Test 10: Large plaintext (multiple blocks)
     total = total + 1
-    local large_plaintext = string.rep("A", 1000)
+    local large_plaintext = string_rep("A", 1000)
     local large_ct = aes_gcm.encrypt(key128, nonce, large_plaintext, aad)
     local large_pt = aes_gcm.decrypt(key128, nonce, large_ct, aad)
 
@@ -1035,7 +1092,7 @@ function aes_gcm.selftest()
 
     -- Test 11: Different key sizes produce different outputs
     total = total + 1
-    local key192 = string.rep(string.char(0x44), 24)
+    local key192 = string_rep(string_char(0x44), 24)
     local ct128 = aes_gcm.encrypt(key128, nonce, plaintext, aad)
     local ct192 = aes_gcm.encrypt(key192, nonce, plaintext, aad)
     local ct256_2 = aes_gcm.encrypt(key256, nonce, plaintext, aad)
@@ -1067,9 +1124,9 @@ function aes_gcm.benchmark()
   local key256 = bytes.from_hex("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308")
   local nonce = bytes.from_hex("cafebabefacedbaddecaf888")
   local aad = "feedfacedeadbeeffeedfacedeadbeefabaddad2"
-  local plaintext_64 = string.rep("a", 64)
-  local plaintext_1k = string.rep("a", 1024)
-  local plaintext_8k = string.rep("a", 8192)
+  local plaintext_64 = string_rep("a", 64)
+  local plaintext_1k = string_rep("a", 1024)
+  local plaintext_8k = string_rep("a", 8192)
 
   print("AES-128-GCM Encryption:")
   benchmark_op("aes128_encrypt_64_bytes", function()
