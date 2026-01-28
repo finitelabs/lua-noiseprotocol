@@ -90,20 +90,22 @@ src/noiseprotocol/
 ├── crypto/                     # Cryptographic primitives
 │   ├── init.lua               # Crypto module aggregator
 │   ├── x25519.lua / x448.lua  # Diffie-Hellman functions
-│   ├── chacha20*.lua          # Stream cipher and AEAD
+│   ├── chacha20.lua           # Stream cipher
+│   ├── chacha20_poly1305.lua  # ChaCha20-Poly1305 AEAD
 │   ├── aes_gcm.lua            # AES-GCM AEAD
 │   ├── poly1305.lua           # Poly1305 MAC
-│   ├── sha*.lua / blake2.lua  # Hash functions
+│   ├── sha256.lua / sha512.lua / blake2.lua  # Hash functions
 ├── utils/                      # Utility modules
-│   ├── bit32.lua / bit64.lua  # Bitwise operations
 │   ├── bytes.lua              # Byte manipulation utilities
 │   └── benchmark.lua          # Performance measurement tools
 └── openssl_wrapper.lua        # Optional OpenSSL acceleration
+vendor/
+└── bitn.lua                    # Unified bitwise operations for all Lua versions
 ```
 
 ### Key Classes and APIs
 
-**NoiseConnection** (`src/noiseprotocol/init.lua:1551`)
+**NoiseConnection** (`src/noiseprotocol/init.lua:1563`)
 - Main API for establishing secure connections
 - Handles handshake patterns (XX, IK, NK, etc.) and PSK variants
 - Manages transport phase encryption/decryption
@@ -143,6 +145,7 @@ Supports all standard patterns from the Noise specification:
 - LuaJIT significantly outperforms standard Lua interpreters
 - Benchmarks should be run with LuaJIT for realistic performance data
 - X448 is notably slower than X25519 in pure Lua
+- Crypto modules use pre-allocated arrays for performance; not thread-safe for concurrent coroutines
 
 ### Compatibility
 - Supports Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT

@@ -1,22 +1,365 @@
 do
 local _ENV = _ENV
+package.preload[ "bitn._compat" ] = function( ... ) local arg = _G.arg;
+--- @diagnostic disable: duplicate-set-field
+--- @module "bitn._compat"
+--- Internal compatibility layer for bitwise operations.
+--- Provides feature detection and optimized primitives for use by bit16/bit32/bit64.
+--- @class bitn._compat
+local _compat = {}
+
+--------------------------------------------------------------------------------
+-- Helper functions (needed by all implementations)
+--------------------------------------------------------------------------------
+
+local math_floor = math.floor
+local math_pow = math.pow or function(x, y)
+  return x ^ y
+end
+
+--- Convert signed 32-bit to unsigned (for LuaJIT which returns signed values)
+--- @param n number Potentially signed 32-bit value
+--- @return number Unsigned 32-bit value
+local function to_unsigned(n)
+  if n < 0 then
+    return n + 0x100000000
+  end
+  return n
+end
+
+_compat.to_unsigned = to_unsigned
+
+-- Constants
+local MASK32 = 0xFFFFFFFF
+
+--------------------------------------------------------------------------------
+-- Implementation 1: Native operators (Lua 5.3+)
+--------------------------------------------------------------------------------
+
+local ok, result = pcall(load, "return function(a,b) return a & b end")
+if ok and result then
+  local fn = result()
+  if fn then
+    -- Native operators available - define all functions using them
+    local native_band = fn
+    local native_bor = assert(load("return function(a,b) return a | b end"))()
+    local native_bxor = assert(load("return function(a,b) return a ~ b end"))()
+    local native_bnot = assert(load("return function(a) return ~a end"))()
+    local native_lshift = assert(load("return function(a,n) return a << n end"))()
+    local native_rshift = assert(load("return function(a,n) return a >> n end"))()
+
+    _compat.has_native_ops = true
+    _compat.has_bit_lib = false
+    _compat.is_luajit = false
+
+    function _compat.impl_name()
+      return "native operators (Lua 5.3+)"
+    end
+
+    function _compat.band(a, b)
+      return native_band(a, b)
+    end
+
+    function _compat.bor(a, b)
+      return native_bor(a, b)
+    end
+
+    function _compat.bxor(a, b)
+      return native_bxor(a, b)
+    end
+
+    function _compat.bnot(a)
+      return native_band(native_bnot(a), MASK32)
+    end
+
+    function _compat.lshift(a, n)
+      if n >= 32 then
+        return 0
+      end
+      return native_band(native_lshift(a, n), MASK32)
+    end
+
+    function _compat.rshift(a, n)
+      if n >= 32 then
+        return 0
+      end
+      return native_rshift(native_band(a, MASK32), n)
+    end
+
+    function _compat.arshift(a, n)
+      a = native_band(a, MASK32)
+      local is_negative = a >= 0x80000000
+      if n >= 32 then
+        return is_negative and MASK32 or 0
+      end
+      local r = native_rshift(a, n)
+      if is_negative then
+        local fill_mask = native_lshift(MASK32, 32 - n)
+        r = native_bor(r, native_band(fill_mask, MASK32))
+      end
+      return native_band(r, MASK32)
+    end
+
+    return _compat
+  end
+end
+
+--------------------------------------------------------------------------------
+-- Implementation 2: Bit library (LuaJIT or Lua 5.2)
+--------------------------------------------------------------------------------
+
+local bit_lib
+local is_luajit = false
+
+-- Try LuaJIT's bit library first
+ok, result = pcall(require, "bit")
+if ok and result then
+  bit_lib = result
+  is_luajit = true
+else
+  -- Try Lua 5.2's bit32 library (use rawget to avoid recursion with our module name)
+  bit_lib = rawget(_G, "bit32")
+end
+
+if bit_lib then
+  -- Bit library available - define all functions using it
+  local bit_band = assert(bit_lib.band)
+  local bit_bor = assert(bit_lib.bor)
+  local bit_bxor = assert(bit_lib.bxor)
+  local bit_bnot = assert(bit_lib.bnot)
+  local bit_lshift = assert(bit_lib.lshift)
+  local bit_rshift = assert(bit_lib.rshift)
+  local bit_arshift = assert(bit_lib.arshift)
+
+  _compat.has_native_ops = false
+  _compat.has_bit_lib = true
+  _compat.is_luajit = is_luajit
+
+  function _compat.impl_name()
+    return "bit library"
+  end
+
+  if is_luajit then
+    -- LuaJIT returns signed integers, need to convert to unsigned
+    function _compat.band(a, b)
+      return to_unsigned(bit_band(a, b))
+    end
+
+    function _compat.bor(a, b)
+      return to_unsigned(bit_bor(a, b))
+    end
+
+    function _compat.bxor(a, b)
+      return to_unsigned(bit_bxor(a, b))
+    end
+
+    function _compat.bnot(a)
+      return to_unsigned(bit_bnot(a))
+    end
+
+    function _compat.lshift(a, n)
+      if n >= 32 then
+        return 0
+      end
+      return to_unsigned(bit_lshift(a, n))
+    end
+
+    function _compat.rshift(a, n)
+      if n >= 32 then
+        return 0
+      end
+      return to_unsigned(bit_rshift(a, n))
+    end
+
+    function _compat.arshift(a, n)
+      a = to_unsigned(bit_band(a, MASK32))
+      if n >= 32 then
+        local is_negative = a >= 0x80000000
+        return is_negative and MASK32 or 0
+      end
+      return to_unsigned(bit_arshift(a, n))
+    end
+  else
+    -- Lua 5.2 bit32 library returns unsigned integers
+    function _compat.band(a, b)
+      return bit_band(a, b)
+    end
+
+    function _compat.bor(a, b)
+      return bit_bor(a, b)
+    end
+
+    function _compat.bxor(a, b)
+      return bit_bxor(a, b)
+    end
+
+    function _compat.bnot(a)
+      return bit_band(bit_bnot(a), MASK32)
+    end
+
+    function _compat.lshift(a, n)
+      if n >= 32 then
+        return 0
+      end
+      return bit_band(bit_lshift(a, n), MASK32)
+    end
+
+    function _compat.rshift(a, n)
+      if n >= 32 then
+        return 0
+      end
+      return bit_rshift(bit_band(a, MASK32), n)
+    end
+
+    function _compat.arshift(a, n)
+      a = bit_band(a, MASK32)
+      if n >= 32 then
+        local is_negative = a >= 0x80000000
+        return is_negative and MASK32 or 0
+      end
+      return bit_band(bit_arshift(a, n), MASK32)
+    end
+  end
+
+  return _compat
+end
+
+--------------------------------------------------------------------------------
+-- Implementation 3: Pure Lua fallback
+--------------------------------------------------------------------------------
+
+_compat.has_native_ops = false
+_compat.has_bit_lib = false
+_compat.is_luajit = false
+
+function _compat.impl_name()
+  return "pure Lua"
+end
+
+function _compat.band(a, b)
+  local r = 0
+  local bit_val = 1
+  for _ = 0, 31 do
+    if (a % 2 == 1) and (b % 2 == 1) then
+      r = r + bit_val
+    end
+    a = math_floor(a / 2)
+    b = math_floor(b / 2)
+    bit_val = bit_val * 2
+    if a == 0 and b == 0 then
+      break
+    end
+  end
+  return r
+end
+
+function _compat.bor(a, b)
+  local r = 0
+  local bit_val = 1
+  for _ = 0, 31 do
+    if (a % 2 == 1) or (b % 2 == 1) then
+      r = r + bit_val
+    end
+    a = math_floor(a / 2)
+    b = math_floor(b / 2)
+    bit_val = bit_val * 2
+    if a == 0 and b == 0 then
+      break
+    end
+  end
+  return r
+end
+
+function _compat.bxor(a, b)
+  local r = 0
+  local bit_val = 1
+  for _ = 0, 31 do
+    if (a % 2) ~= (b % 2) then
+      r = r + bit_val
+    end
+    a = math_floor(a / 2)
+    b = math_floor(b / 2)
+    bit_val = bit_val * 2
+    if a == 0 and b == 0 then
+      break
+    end
+  end
+  return r
+end
+
+function _compat.bnot(a)
+  return MASK32 - (math_floor(a) % 0x100000000)
+end
+
+function _compat.lshift(a, n)
+  if n >= 32 then
+    return 0
+  end
+  return math_floor((a * math_pow(2, n)) % 0x100000000)
+end
+
+function _compat.rshift(a, n)
+  if n >= 32 then
+    return 0
+  end
+  a = math_floor(a) % 0x100000000
+  return math_floor(a / math_pow(2, n))
+end
+
+function _compat.arshift(a, n)
+  a = math_floor(a) % 0x100000000
+  local is_negative = a >= 0x80000000
+  if n >= 32 then
+    return is_negative and MASK32 or 0
+  end
+  local r = math_floor(a / math_pow(2, n))
+  if is_negative then
+    local fill_mask = MASK32 - (math_pow(2, 32 - n) - 1)
+    r = _compat.bor(r, fill_mask)
+  end
+  return r
+end
+
+return _compat
+end
+end
+
+do
+local _ENV = _ENV
 package.preload[ "bitn.bit16" ] = function( ... ) local arg = _G.arg;
 --- @module "bitn.bit16"
---- Pure Lua 16-bit bitwise operations library.
+--- 16-bit bitwise operations library.
 --- This module provides a complete, version-agnostic implementation of 16-bit
---- bitwise operations that works across Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT
---- without depending on any built-in bit libraries.
---- @class bit16
+--- bitwise operations that works across Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT.
+--- Uses native bit operations where available for optimal performance.
+--- @class bitn.bit16
 local bit16 = {}
+
+local _compat = require("bitn._compat")
+
+-- Cache methods as locals for faster access
+local compat_band = _compat.band
+local compat_bor = _compat.bor
+local compat_bxor = _compat.bxor
+local compat_bnot = _compat.bnot
+local compat_lshift = _compat.lshift
+local compat_rshift = _compat.rshift
+local impl_name = _compat.impl_name
 
 -- 16-bit mask constant
 local MASK16 = 0xFFFF
+
+local math_floor = math.floor
+
+--------------------------------------------------------------------------------
+-- Core operations
+--------------------------------------------------------------------------------
 
 --- Ensure value fits in 16-bit unsigned integer.
 --- @param n number Input value
 --- @return integer result 16-bit unsigned integer (0 to 0xFFFF)
 function bit16.mask(n)
-  return math.floor(n % 0x10000)
+  return compat_band(math_floor(n), MASK16)
 end
 
 --- Bitwise AND operation.
@@ -24,26 +367,7 @@ end
 --- @param b integer Second operand (16-bit)
 --- @return integer result Result of a AND b
 function bit16.band(a, b)
-  a = bit16.mask(a)
-  b = bit16.mask(b)
-
-  local result = 0
-  local bit_val = 1
-
-  for _ = 0, 15 do
-    if (a % 2 == 1) and (b % 2 == 1) then
-      result = result + bit_val
-    end
-    a = math.floor(a / 2)
-    b = math.floor(b / 2)
-    bit_val = bit_val * 2
-
-    if a == 0 and b == 0 then
-      break
-    end
-  end
-
-  return result
+  return compat_band(compat_band(a, MASK16), compat_band(b, MASK16))
 end
 
 --- Bitwise OR operation.
@@ -51,26 +375,7 @@ end
 --- @param b integer Second operand (16-bit)
 --- @return integer result Result of a OR b
 function bit16.bor(a, b)
-  a = bit16.mask(a)
-  b = bit16.mask(b)
-
-  local result = 0
-  local bit_val = 1
-
-  for _ = 0, 15 do
-    if (a % 2 == 1) or (b % 2 == 1) then
-      result = result + bit_val
-    end
-    a = math.floor(a / 2)
-    b = math.floor(b / 2)
-    bit_val = bit_val * 2
-
-    if a == 0 and b == 0 then
-      break
-    end
-  end
-
-  return result
+  return compat_band(compat_bor(a, b), MASK16)
 end
 
 --- Bitwise XOR operation.
@@ -78,33 +383,14 @@ end
 --- @param b integer Second operand (16-bit)
 --- @return integer result Result of a XOR b
 function bit16.bxor(a, b)
-  a = bit16.mask(a)
-  b = bit16.mask(b)
-
-  local result = 0
-  local bit_val = 1
-
-  for _ = 0, 15 do
-    if (a % 2) ~= (b % 2) then
-      result = result + bit_val
-    end
-    a = math.floor(a / 2)
-    b = math.floor(b / 2)
-    bit_val = bit_val * 2
-
-    if a == 0 and b == 0 then
-      break
-    end
-  end
-
-  return result
+  return compat_band(compat_bxor(a, b), MASK16)
 end
 
 --- Bitwise NOT operation.
 --- @param a integer Operand (16-bit)
 --- @return integer result Result of NOT a
 function bit16.bnot(a)
-  return bit16.mask(MASK16 - bit16.mask(a))
+  return compat_band(compat_bnot(a), MASK16)
 end
 
 --- Left shift operation.
@@ -116,7 +402,7 @@ function bit16.lshift(a, n)
   if n >= 16 then
     return 0
   end
-  return bit16.mask(bit16.mask(a) * math.pow(2, n))
+  return compat_band(compat_lshift(compat_band(a, MASK16), n), MASK16)
 end
 
 --- Logical right shift operation (fills with 0s).
@@ -125,11 +411,10 @@ end
 --- @return integer result Result of a >> n (logical)
 function bit16.rshift(a, n)
   assert(n >= 0, "Shift amount must be non-negative")
-  a = bit16.mask(a)
   if n >= 16 then
     return 0
   end
-  return math.floor(a / math.pow(2, n))
+  return compat_rshift(compat_band(a, MASK16), n)
 end
 
 --- Arithmetic right shift operation (sign-extending, fills with sign bit).
@@ -138,27 +423,25 @@ end
 --- @return integer result Result of a >> n with sign extension
 function bit16.arshift(a, n)
   assert(n >= 0, "Shift amount must be non-negative")
-  a = bit16.mask(a)
+  a = compat_band(a, MASK16)
 
   -- Check if sign bit is set (bit 15)
   local is_negative = a >= 0x8000
 
   if n >= 16 then
-    -- All bits shift out, result is all 1s if negative, all 0s if positive
-    return is_negative and 0xFFFF or 0
+    return is_negative and MASK16 or 0
   end
 
-  -- Perform logical right shift first
-  local result = math.floor(a / math.pow(2, n))
+  -- Perform logical right shift
+  local result = compat_rshift(a, n)
 
   -- If original was negative, fill high bits with 1s
   if is_negative then
-    -- Create mask for high bits that need to be 1
-    local fill_mask = MASK16 - (math.floor(2 ^ (16 - n)) - 1)
-    result = bit16.bor(result, fill_mask)
+    local fill_mask = compat_band(compat_lshift(MASK16, 16 - n), MASK16)
+    result = compat_bor(result, fill_mask)
   end
 
-  return result
+  return compat_band(result, MASK16)
 end
 
 --- Left rotate operation.
@@ -167,8 +450,8 @@ end
 --- @return integer result Result of rotating x left by n positions
 function bit16.rol(x, n)
   n = n % 16
-  x = bit16.mask(x)
-  return bit16.mask(bit16.lshift(x, n) + bit16.rshift(x, 16 - n))
+  x = compat_band(x, MASK16)
+  return compat_band(compat_bor(compat_lshift(x, n), compat_rshift(x, 16 - n)), MASK16)
 end
 
 --- Right rotate operation.
@@ -177,8 +460,8 @@ end
 --- @return integer result Result of rotating x right by n positions
 function bit16.ror(x, n)
   n = n % 16
-  x = bit16.mask(x)
-  return bit16.mask(bit16.rshift(x, n) + bit16.lshift(x, 16 - n))
+  x = compat_band(x, MASK16)
+  return compat_band(compat_bor(compat_rshift(x, n), compat_lshift(x, 16 - n)), MASK16)
 end
 
 --- 16-bit addition with overflow handling.
@@ -186,27 +469,30 @@ end
 --- @param b integer Second operand (16-bit)
 --- @return integer result Result of (a + b) mod 2^16
 function bit16.add(a, b)
-  return bit16.mask(bit16.mask(a) + bit16.mask(b))
+  return compat_band(compat_band(a, MASK16) + compat_band(b, MASK16), MASK16)
 end
 
 --------------------------------------------------------------------------------
 -- Byte conversion functions
 --------------------------------------------------------------------------------
 
+local string_char = string.char
+local string_byte = string.byte
+
 --- Convert 16-bit unsigned integer to 2 bytes (big-endian).
 --- @param n integer 16-bit unsigned integer
 --- @return string bytes 2-byte string in big-endian order
 function bit16.u16_to_be_bytes(n)
-  n = bit16.mask(n)
-  return string.char(math.floor(n / 256), n % 256)
+  n = compat_band(n, MASK16)
+  return string_char(math_floor(n / 256), n % 256)
 end
 
 --- Convert 16-bit unsigned integer to 2 bytes (little-endian).
 --- @param n integer 16-bit unsigned integer
 --- @return string bytes 2-byte string in little-endian order
 function bit16.u16_to_le_bytes(n)
-  n = bit16.mask(n)
-  return string.char(n % 256, math.floor(n / 256))
+  n = compat_band(n, MASK16)
+  return string_char(n % 256, math_floor(n / 256))
 end
 
 --- Convert 2 bytes to 16-bit unsigned integer (big-endian).
@@ -216,7 +502,7 @@ end
 function bit16.be_bytes_to_u16(str, offset)
   offset = offset or 1
   assert(#str >= offset + 1, "Insufficient bytes for u16")
-  local b1, b2 = string.byte(str, offset, offset + 1)
+  local b1, b2 = string_byte(str, offset, offset + 1)
   return b1 * 256 + b2
 end
 
@@ -227,7 +513,7 @@ end
 function bit16.le_bytes_to_u16(str, offset)
   offset = offset or 1
   assert(#str >= offset + 1, "Insufficient bytes for u16")
-  local b1, b2 = string.byte(str, offset, offset + 1)
+  local b1, b2 = string_byte(str, offset, offset + 1)
   return b1 + b2 * 256
 end
 
@@ -242,6 +528,7 @@ local unpack_fn = unpack or table.unpack
 --- @return boolean result True if all tests pass, false otherwise
 function bit16.selftest()
   print("Running 16-bit operations test vectors...")
+  print(string.format("  Using: %s", impl_name()))
   local passed = 0
   local total = 0
 
@@ -445,6 +732,94 @@ function bit16.selftest()
   return passed == total
 end
 
+--------------------------------------------------------------------------------
+-- Benchmarking
+--------------------------------------------------------------------------------
+
+local benchmark_op = require("bitn.utils.benchmark").benchmark_op
+
+--- Run performance benchmarks for 16-bit operations.
+function bit16.benchmark()
+  local iterations = 100000
+
+  print("16-bit Bitwise Operations:")
+  print(string.format("  Implementation: %s", impl_name()))
+
+  -- Test values
+  local a, b = 0xAAAA, 0x5555
+
+  benchmark_op("band", function()
+    bit16.band(a, b)
+  end, iterations)
+
+  benchmark_op("bor", function()
+    bit16.bor(a, b)
+  end, iterations)
+
+  benchmark_op("bxor", function()
+    bit16.bxor(a, b)
+  end, iterations)
+
+  benchmark_op("bnot", function()
+    bit16.bnot(a)
+  end, iterations)
+
+  print("\n16-bit Shift Operations:")
+
+  benchmark_op("lshift", function()
+    bit16.lshift(a, 4)
+  end, iterations)
+
+  benchmark_op("rshift", function()
+    bit16.rshift(a, 4)
+  end, iterations)
+
+  benchmark_op("arshift", function()
+    bit16.arshift(0x8000, 4)
+  end, iterations)
+
+  print("\n16-bit Rotate Operations:")
+
+  benchmark_op("rol", function()
+    bit16.rol(a, 4)
+  end, iterations)
+
+  benchmark_op("ror", function()
+    bit16.ror(a, 4)
+  end, iterations)
+
+  print("\n16-bit Arithmetic:")
+
+  benchmark_op("add", function()
+    bit16.add(a, b)
+  end, iterations)
+
+  benchmark_op("mask", function()
+    bit16.mask(0x12345)
+  end, iterations)
+
+  print("\n16-bit Byte Conversions:")
+
+  local bytes_be = bit16.u16_to_be_bytes(0x1234)
+  local bytes_le = bit16.u16_to_le_bytes(0x1234)
+
+  benchmark_op("u16_to_be_bytes", function()
+    bit16.u16_to_be_bytes(0x1234)
+  end, iterations)
+
+  benchmark_op("u16_to_le_bytes", function()
+    bit16.u16_to_le_bytes(0x1234)
+  end, iterations)
+
+  benchmark_op("be_bytes_to_u16", function()
+    bit16.be_bytes_to_u16(bytes_be)
+  end, iterations)
+
+  benchmark_op("le_bytes_to_u16", function()
+    bit16.le_bytes_to_u16(bytes_le)
+  end, iterations)
+end
+
 return bit16
 end
 end
@@ -453,21 +828,39 @@ do
 local _ENV = _ENV
 package.preload[ "bitn.bit32" ] = function( ... ) local arg = _G.arg;
 --- @module "bitn.bit32"
---- Pure Lua 32-bit bitwise operations library.
+--- 32-bit bitwise operations library.
 --- This module provides a complete, version-agnostic implementation of 32-bit
---- bitwise operations that works across Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT
---- without depending on any built-in bit libraries.
---- @class bit32
+--- bitwise operations that works across Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT.
+--- Uses native bit operations where available for optimal performance.
+--- @class bitn.bit32
 local bit32 = {}
+
+local _compat = require("bitn._compat")
+
+-- Cache methods as locals for faster access
+local compat_band = _compat.band
+local compat_bor = _compat.bor
+local compat_bxor = _compat.bxor
+local compat_bnot = _compat.bnot
+local compat_lshift = _compat.lshift
+local compat_rshift = _compat.rshift
+local compat_arshift = _compat.arshift
+local impl_name = _compat.impl_name
 
 -- 32-bit mask constant
 local MASK32 = 0xFFFFFFFF
+
+local math_floor = math.floor
+
+--------------------------------------------------------------------------------
+-- Core operations
+--------------------------------------------------------------------------------
 
 --- Ensure value fits in 32-bit unsigned integer.
 --- @param n number Input value
 --- @return integer result 32-bit unsigned integer (0 to 0xFFFFFFFF)
 function bit32.mask(n)
-  return math.floor(n % 0x100000000)
+  return compat_band(math_floor(n), MASK32)
 end
 
 --- Bitwise AND operation.
@@ -475,26 +868,7 @@ end
 --- @param b integer Second operand (32-bit)
 --- @return integer result Result of a AND b
 function bit32.band(a, b)
-  a = bit32.mask(a)
-  b = bit32.mask(b)
-
-  local result = 0
-  local bit_val = 1
-
-  for _ = 0, 31 do
-    if (a % 2 == 1) and (b % 2 == 1) then
-      result = result + bit_val
-    end
-    a = math.floor(a / 2)
-    b = math.floor(b / 2)
-    bit_val = bit_val * 2
-
-    if a == 0 and b == 0 then
-      break
-    end
-  end
-
-  return result
+  return compat_band(compat_band(a, MASK32), compat_band(b, MASK32))
 end
 
 --- Bitwise OR operation.
@@ -502,26 +876,7 @@ end
 --- @param b integer Second operand (32-bit)
 --- @return integer result Result of a OR b
 function bit32.bor(a, b)
-  a = bit32.mask(a)
-  b = bit32.mask(b)
-
-  local result = 0
-  local bit_val = 1
-
-  for _ = 0, 31 do
-    if (a % 2 == 1) or (b % 2 == 1) then
-      result = result + bit_val
-    end
-    a = math.floor(a / 2)
-    b = math.floor(b / 2)
-    bit_val = bit_val * 2
-
-    if a == 0 and b == 0 then
-      break
-    end
-  end
-
-  return result
+  return compat_band(compat_bor(a, b), MASK32)
 end
 
 --- Bitwise XOR operation.
@@ -529,33 +884,14 @@ end
 --- @param b integer Second operand (32-bit)
 --- @return integer result Result of a XOR b
 function bit32.bxor(a, b)
-  a = bit32.mask(a)
-  b = bit32.mask(b)
-
-  local result = 0
-  local bit_val = 1
-
-  for _ = 0, 31 do
-    if (a % 2) ~= (b % 2) then
-      result = result + bit_val
-    end
-    a = math.floor(a / 2)
-    b = math.floor(b / 2)
-    bit_val = bit_val * 2
-
-    if a == 0 and b == 0 then
-      break
-    end
-  end
-
-  return result
+  return compat_band(compat_bxor(a, b), MASK32)
 end
 
 --- Bitwise NOT operation.
 --- @param a integer Operand (32-bit)
 --- @return integer result Result of NOT a
 function bit32.bnot(a)
-  return bit32.mask(MASK32 - bit32.mask(a))
+  return compat_band(compat_bnot(a), MASK32)
 end
 
 --- Left shift operation.
@@ -567,7 +903,7 @@ function bit32.lshift(a, n)
   if n >= 32 then
     return 0
   end
-  return bit32.mask(bit32.mask(a) * math.pow(2, n))
+  return compat_band(compat_lshift(compat_band(a, MASK32), n), MASK32)
 end
 
 --- Logical right shift operation (fills with 0s).
@@ -576,11 +912,10 @@ end
 --- @return integer result Result of a >> n (logical)
 function bit32.rshift(a, n)
   assert(n >= 0, "Shift amount must be non-negative")
-  a = bit32.mask(a)
   if n >= 32 then
     return 0
   end
-  return math.floor(a / math.pow(2, n))
+  return compat_rshift(compat_band(a, MASK32), n)
 end
 
 --- Arithmetic right shift operation (sign-extending, fills with sign bit).
@@ -589,27 +924,7 @@ end
 --- @return integer result Result of a >> n with sign extension
 function bit32.arshift(a, n)
   assert(n >= 0, "Shift amount must be non-negative")
-  a = bit32.mask(a)
-
-  -- Check if sign bit is set (bit 31)
-  local is_negative = a >= 0x80000000
-
-  if n >= 32 then
-    -- All bits shift out, result is all 1s if negative, all 0s if positive
-    return is_negative and 0xFFFFFFFF or 0
-  end
-
-  -- Perform logical right shift first
-  local result = math.floor(a / math.pow(2, n))
-
-  -- If original was negative, fill high bits with 1s
-  if is_negative then
-    -- Create mask for high bits that need to be 1
-    local fill_mask = MASK32 - (math.pow(2, 32 - n) - 1)
-    result = bit32.bor(result, fill_mask)
-  end
-
-  return result
+  return compat_arshift(a, n)
 end
 
 --- Left rotate operation.
@@ -618,8 +933,8 @@ end
 --- @return integer result Result of rotating x left by n positions
 function bit32.rol(x, n)
   n = n % 32
-  x = bit32.mask(x)
-  return bit32.mask(bit32.lshift(x, n) + bit32.rshift(x, 32 - n))
+  x = compat_band(x, MASK32)
+  return compat_band(compat_bor(compat_lshift(x, n), compat_rshift(x, 32 - n)), MASK32)
 end
 
 --- Right rotate operation.
@@ -628,8 +943,8 @@ end
 --- @return integer result Result of rotating x right by n positions
 function bit32.ror(x, n)
   n = n % 32
-  x = bit32.mask(x)
-  return bit32.mask(bit32.rshift(x, n) + bit32.lshift(x, 32 - n))
+  x = compat_band(x, MASK32)
+  return compat_band(compat_bor(compat_rshift(x, n), compat_lshift(x, 32 - n)), MASK32)
 end
 
 --- 32-bit addition with overflow handling.
@@ -637,27 +952,30 @@ end
 --- @param b integer Second operand (32-bit)
 --- @return integer result Result of (a + b) mod 2^32
 function bit32.add(a, b)
-  return bit32.mask(bit32.mask(a) + bit32.mask(b))
+  return compat_band(compat_band(a, MASK32) + compat_band(b, MASK32), MASK32)
 end
 
 --------------------------------------------------------------------------------
 -- Byte conversion functions
 --------------------------------------------------------------------------------
 
+local string_char = string.char
+local string_byte = string.byte
+
 --- Convert 32-bit unsigned integer to 4 bytes (big-endian).
 --- @param n integer 32-bit unsigned integer
 --- @return string bytes 4-byte string in big-endian order
 function bit32.u32_to_be_bytes(n)
-  n = bit32.mask(n)
-  return string.char(math.floor(n / 16777216) % 256, math.floor(n / 65536) % 256, math.floor(n / 256) % 256, n % 256)
+  n = compat_band(n, MASK32)
+  return string_char(math_floor(n / 16777216) % 256, math_floor(n / 65536) % 256, math_floor(n / 256) % 256, n % 256)
 end
 
 --- Convert 32-bit unsigned integer to 4 bytes (little-endian).
 --- @param n integer 32-bit unsigned integer
 --- @return string bytes 4-byte string in little-endian order
 function bit32.u32_to_le_bytes(n)
-  n = bit32.mask(n)
-  return string.char(n % 256, math.floor(n / 256) % 256, math.floor(n / 65536) % 256, math.floor(n / 16777216) % 256)
+  n = compat_band(n, MASK32)
+  return string_char(n % 256, math_floor(n / 256) % 256, math_floor(n / 65536) % 256, math_floor(n / 16777216) % 256)
 end
 
 --- Convert 4 bytes to 32-bit unsigned integer (big-endian).
@@ -667,7 +985,7 @@ end
 function bit32.be_bytes_to_u32(str, offset)
   offset = offset or 1
   assert(#str >= offset + 3, "Insufficient bytes for u32")
-  local b1, b2, b3, b4 = string.byte(str, offset, offset + 3)
+  local b1, b2, b3, b4 = string_byte(str, offset, offset + 3)
   return b1 * 16777216 + b2 * 65536 + b3 * 256 + b4
 end
 
@@ -678,7 +996,7 @@ end
 function bit32.le_bytes_to_u32(str, offset)
   offset = offset or 1
   assert(#str >= offset + 3, "Insufficient bytes for u32")
-  local b1, b2, b3, b4 = string.byte(str, offset, offset + 3)
+  local b1, b2, b3, b4 = string_byte(str, offset, offset + 3)
   return b1 + b2 * 256 + b3 * 65536 + b4 * 16777216
 end
 
@@ -693,6 +1011,7 @@ local unpack_fn = unpack or table.unpack
 --- @return boolean result True if all tests pass, false otherwise
 function bit32.selftest()
   print("Running 32-bit operations test vectors...")
+  print(string.format("  Using: %s", impl_name()))
   local passed = 0
   local total = 0
 
@@ -948,6 +1267,94 @@ function bit32.selftest()
   return passed == total
 end
 
+--------------------------------------------------------------------------------
+-- Benchmarking
+--------------------------------------------------------------------------------
+
+local benchmark_op = require("bitn.utils.benchmark").benchmark_op
+
+--- Run performance benchmarks for 32-bit operations.
+function bit32.benchmark()
+  local iterations = 100000
+
+  print("32-bit Bitwise Operations:")
+  print(string.format("  Implementation: %s", impl_name()))
+
+  -- Test values
+  local a, b = 0xAAAAAAAA, 0x55555555
+
+  benchmark_op("band", function()
+    bit32.band(a, b)
+  end, iterations)
+
+  benchmark_op("bor", function()
+    bit32.bor(a, b)
+  end, iterations)
+
+  benchmark_op("bxor", function()
+    bit32.bxor(a, b)
+  end, iterations)
+
+  benchmark_op("bnot", function()
+    bit32.bnot(a)
+  end, iterations)
+
+  print("\n32-bit Shift Operations:")
+
+  benchmark_op("lshift", function()
+    bit32.lshift(a, 8)
+  end, iterations)
+
+  benchmark_op("rshift", function()
+    bit32.rshift(a, 8)
+  end, iterations)
+
+  benchmark_op("arshift", function()
+    bit32.arshift(0x80000000, 8)
+  end, iterations)
+
+  print("\n32-bit Rotate Operations:")
+
+  benchmark_op("rol", function()
+    bit32.rol(a, 8)
+  end, iterations)
+
+  benchmark_op("ror", function()
+    bit32.ror(a, 8)
+  end, iterations)
+
+  print("\n32-bit Arithmetic:")
+
+  benchmark_op("add", function()
+    bit32.add(a, b)
+  end, iterations)
+
+  benchmark_op("mask", function()
+    bit32.mask(0x123456789)
+  end, iterations)
+
+  print("\n32-bit Byte Conversions:")
+
+  local bytes_be = bit32.u32_to_be_bytes(0x12345678)
+  local bytes_le = bit32.u32_to_le_bytes(0x12345678)
+
+  benchmark_op("u32_to_be_bytes", function()
+    bit32.u32_to_be_bytes(0x12345678)
+  end, iterations)
+
+  benchmark_op("u32_to_le_bytes", function()
+    bit32.u32_to_le_bytes(0x12345678)
+  end, iterations)
+
+  benchmark_op("be_bytes_to_u32", function()
+    bit32.be_bytes_to_u32(bytes_be)
+  end, iterations)
+
+  benchmark_op("le_bytes_to_u32", function()
+    bit32.le_bytes_to_u32(bytes_le)
+  end, iterations)
+end
+
 return bit32
 end
 end
@@ -956,15 +1363,30 @@ do
 local _ENV = _ENV
 package.preload[ "bitn.bit64" ] = function( ... ) local arg = _G.arg;
 --- @module "bitn.bit64"
---- Pure Lua 64-bit bitwise operations library.
+--- 64-bit bitwise operations library.
 --- This module provides 64-bit bitwise operations using {high, low} pairs,
 --- where high is the upper 32 bits and low is the lower 32 bits.
---- Works across Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT without depending on
---- any built-in bit libraries.
---- @class bit64
+--- Works across Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT.
+--- Uses native bit operations where available for optimal performance.
+--- @class bitn.bit64
 local bit64 = {}
 
 local bit32 = require("bitn.bit32")
+local _compat = require("bitn._compat")
+local impl_name = _compat.impl_name
+
+-- Cache bit32 methods as locals for faster access
+local bit32_band = bit32.band
+local bit32_bor = bit32.bor
+local bit32_bxor = bit32.bxor
+local bit32_bnot = bit32.bnot
+local bit32_lshift = bit32.lshift
+local bit32_rshift = bit32.rshift
+local bit32_arshift = bit32.arshift
+local bit32_u32_to_be_bytes = bit32.u32_to_be_bytes
+local bit32_u32_to_le_bytes = bit32.u32_to_le_bytes
+local bit32_be_bytes_to_u32 = bit32.be_bytes_to_u32
+local bit32_le_bytes_to_u32 = bit32.le_bytes_to_u32
 
 -- Private metatable for Int64 type identification
 local Int64Meta = { __name = "Int64" }
@@ -1000,7 +1422,7 @@ end
 --- @param b Int64HighLow Second operand {high, low}
 --- @return Int64HighLow result {high, low} AND result
 function bit64.band(a, b)
-  return bit64.new(bit32.band(a[1], b[1]), bit32.band(a[2], b[2]))
+  return bit64.new(bit32_band(a[1], b[1]), bit32_band(a[2], b[2]))
 end
 
 --- Bitwise OR operation.
@@ -1008,7 +1430,7 @@ end
 --- @param b Int64HighLow Second operand {high, low}
 --- @return Int64HighLow result {high, low} OR result
 function bit64.bor(a, b)
-  return bit64.new(bit32.bor(a[1], b[1]), bit32.bor(a[2], b[2]))
+  return bit64.new(bit32_bor(a[1], b[1]), bit32_bor(a[2], b[2]))
 end
 
 --- Bitwise XOR operation.
@@ -1016,14 +1438,14 @@ end
 --- @param b Int64HighLow Second operand {high, low}
 --- @return Int64HighLow result {high, low} XOR result
 function bit64.bxor(a, b)
-  return bit64.new(bit32.bxor(a[1], b[1]), bit32.bxor(a[2], b[2]))
+  return bit64.new(bit32_bxor(a[1], b[1]), bit32_bxor(a[2], b[2]))
 end
 
 --- Bitwise NOT operation.
 --- @param a Int64HighLow Operand {high, low}
 --- @return Int64HighLow result {high, low} NOT result
 function bit64.bnot(a)
-  return bit64.new(bit32.bnot(a[1]), bit32.bnot(a[2]))
+  return bit64.new(bit32_bnot(a[1]), bit32_bnot(a[2]))
 end
 
 --------------------------------------------------------------------------------
@@ -1041,11 +1463,11 @@ function bit64.lshift(x, n)
     return bit64.new(0, 0)
   elseif n >= 32 then
     -- Shift by 32 or more: low becomes 0, high gets bits from low
-    return bit64.new(bit32.lshift(x[2], n - 32), 0)
+    return bit64.new(bit32_lshift(x[2], n - 32), 0)
   else
     -- Shift by less than 32
-    local new_high = bit32.bor(bit32.lshift(x[1], n), bit32.rshift(x[2], 32 - n))
-    local new_low = bit32.lshift(x[2], n)
+    local new_high = bit32_bor(bit32_lshift(x[1], n), bit32_rshift(x[2], 32 - n))
+    local new_low = bit32_lshift(x[2], n)
     return bit64.new(new_high, new_low)
   end
 end
@@ -1061,11 +1483,11 @@ function bit64.rshift(x, n)
     return bit64.new(0, 0)
   elseif n >= 32 then
     -- Shift by 32 or more: high becomes 0, low gets bits from high
-    return bit64.new(0, bit32.rshift(x[1], n - 32))
+    return bit64.new(0, bit32_rshift(x[1], n - 32))
   else
     -- Shift by less than 32
-    local new_low = bit32.bor(bit32.rshift(x[2], n), bit32.lshift(x[1], 32 - n))
-    local new_high = bit32.rshift(x[1], n)
+    local new_low = bit32_bor(bit32_rshift(x[2], n), bit32_lshift(x[1], 32 - n))
+    local new_high = bit32_rshift(x[1], n)
     return bit64.new(new_high, new_low)
   end
 end
@@ -1080,7 +1502,7 @@ function bit64.arshift(x, n)
   end
 
   -- Check sign bit (bit 31 of high word)
-  local is_negative = bit32.band(x[1], 0x80000000) ~= 0
+  local is_negative = bit32_band(x[1], 0x80000000) ~= 0
 
   if n >= 64 then
     -- All bits shift out, result is all 1s if negative, all 0s if positive
@@ -1091,13 +1513,13 @@ function bit64.arshift(x, n)
     end
   elseif n >= 32 then
     -- High word shifts into low, high fills with sign
-    local new_low = bit32.arshift(x[1], n - 32)
+    local new_low = bit32_arshift(x[1], n - 32)
     local new_high = is_negative and 0xFFFFFFFF or 0
     return bit64.new(new_high, new_low)
   else
     -- Shift by less than 32
-    local new_low = bit32.bor(bit32.rshift(x[2], n), bit32.lshift(x[1], 32 - n))
-    local new_high = bit32.arshift(x[1], n)
+    local new_low = bit32_bor(bit32_rshift(x[2], n), bit32_lshift(x[1], 32 - n))
+    local new_high = bit32_arshift(x[1], n)
     return bit64.new(new_high, new_low)
   end
 end
@@ -1123,14 +1545,14 @@ function bit64.rol(x, n)
     return bit64.new(low, high)
   elseif n < 32 then
     -- Rotate within 32-bit boundaries
-    local new_high = bit32.bor(bit32.lshift(high, n), bit32.rshift(low, 32 - n))
-    local new_low = bit32.bor(bit32.lshift(low, n), bit32.rshift(high, 32 - n))
+    local new_high = bit32_bor(bit32_lshift(high, n), bit32_rshift(low, 32 - n))
+    local new_low = bit32_bor(bit32_lshift(low, n), bit32_rshift(high, 32 - n))
     return bit64.new(new_high, new_low)
   else
     -- n > 32: rotate by (n - 32) after swapping
     n = n - 32
-    local new_high = bit32.bor(bit32.lshift(low, n), bit32.rshift(high, 32 - n))
-    local new_low = bit32.bor(bit32.lshift(high, n), bit32.rshift(low, 32 - n))
+    local new_high = bit32_bor(bit32_lshift(low, n), bit32_rshift(high, 32 - n))
+    local new_low = bit32_bor(bit32_lshift(high, n), bit32_rshift(low, 32 - n))
     return bit64.new(new_high, new_low)
   end
 end
@@ -1152,14 +1574,14 @@ function bit64.ror(x, n)
     return bit64.new(low, high)
   elseif n < 32 then
     -- Rotate within 32-bit boundaries
-    local new_low = bit32.bor(bit32.rshift(low, n), bit32.lshift(high, 32 - n))
-    local new_high = bit32.bor(bit32.rshift(high, n), bit32.lshift(low, 32 - n))
+    local new_low = bit32_bor(bit32_rshift(low, n), bit32_lshift(high, 32 - n))
+    local new_high = bit32_bor(bit32_rshift(high, n), bit32_lshift(low, 32 - n))
     return bit64.new(new_high, new_low)
   else
     -- n > 32: rotate by (n - 32) after swapping
     n = n - 32
-    local new_low = bit32.bor(bit32.rshift(high, n), bit32.lshift(low, 32 - n))
-    local new_high = bit32.bor(bit32.rshift(low, n), bit32.lshift(high, 32 - n))
+    local new_low = bit32_bor(bit32_rshift(high, n), bit32_lshift(low, 32 - n))
+    local new_high = bit32_bor(bit32_rshift(low, n), bit32_lshift(high, 32 - n))
     return bit64.new(new_high, new_low)
   end
 end
@@ -1196,14 +1618,14 @@ end
 --- @param x Int64HighLow 64-bit value {high, low}
 --- @return string bytes 8-byte string in big-endian order
 function bit64.u64_to_be_bytes(x)
-  return bit32.u32_to_be_bytes(x[1]) .. bit32.u32_to_be_bytes(x[2])
+  return bit32_u32_to_be_bytes(x[1]) .. bit32_u32_to_be_bytes(x[2])
 end
 
 --- Convert 64-bit value to 8 bytes (little-endian).
 --- @param x Int64HighLow 64-bit value {high, low}
 --- @return string bytes 8-byte string in little-endian order
 function bit64.u64_to_le_bytes(x)
-  return bit32.u32_to_le_bytes(x[2]) .. bit32.u32_to_le_bytes(x[1])
+  return bit32_u32_to_le_bytes(x[2]) .. bit32_u32_to_le_bytes(x[1])
 end
 
 --- Convert 8 bytes to 64-bit value (big-endian).
@@ -1213,8 +1635,8 @@ end
 function bit64.be_bytes_to_u64(str, offset)
   offset = offset or 1
   assert(#str >= offset + 7, "Insufficient bytes for u64")
-  local high = bit32.be_bytes_to_u32(str, offset)
-  local low = bit32.be_bytes_to_u32(str, offset + 4)
+  local high = bit32_be_bytes_to_u32(str, offset)
+  local low = bit32_be_bytes_to_u32(str, offset + 4)
   return bit64.new(high, low)
 end
 
@@ -1225,8 +1647,8 @@ end
 function bit64.le_bytes_to_u64(str, offset)
   offset = offset or 1
   assert(#str >= offset + 7, "Insufficient bytes for u64")
-  local low = bit32.le_bytes_to_u32(str, offset)
-  local high = bit32.le_bytes_to_u32(str, offset + 4)
+  local low = bit32_le_bytes_to_u32(str, offset)
+  local high = bit32_le_bytes_to_u32(str, offset + 4)
   return bit64.new(high, low)
 end
 
@@ -1245,9 +1667,15 @@ end
 --- Warning: Lua numbers use 64-bit IEEE 754 doubles with 53-bit mantissa precision.
 --- Values exceeding 53 bits (greater than 9007199254740991) will lose precision.
 --- To maintain full 64-bit precision, keep values in {high, low} format.
---- @param value number|Int64HighLow The {high_32, low_32} pair (or number to pass through).
+--- @param value number|integer|Int64HighLow The {high_32, low_32} pair (or number to pass through).
 --- @param strict? boolean If true, errors when value exceeds 53-bit precision.
---- @return number result The value as a Lua number (may lose precision for large values unless strict).
+--- @return number|integer result The value as a Lua number (may lose precision for large values unless strict).
+--- @overload fun(value: number, strict?: boolean): number
+--- @overload fun(value: integer, strict?: boolean): integer
+--- @overload fun(value: Int64HighLow, strict?: boolean): integer
+--- @overload fun(value: number): number
+--- @overload fun(value: integer): integer
+--- @overload fun(value: Int64HighLow): integer
 function bit64.to_number(value, strict)
   if type(value) == "number" then
     return value
@@ -1335,6 +1763,7 @@ end
 --- @return boolean result True if all tests pass, false otherwise
 function bit64.selftest()
   print("Running 64-bit operations test vectors...")
+  print(string.format("  Using: %s", impl_name()))
   local passed = 0
   local total = 0
 
@@ -1884,16 +2313,192 @@ function bit64.selftest()
   return passed == total
 end
 
+--------------------------------------------------------------------------------
+-- Benchmarking
+--------------------------------------------------------------------------------
+
+local benchmark_op = require("bitn.utils.benchmark").benchmark_op
+
+--- Run performance benchmarks for 64-bit operations.
+function bit64.benchmark()
+  local iterations = 100000
+
+  print("64-bit Bitwise Operations:")
+  print(string.format("  Implementation: %s", impl_name()))
+
+  -- Test values
+  local a = bit64.new(0xAAAAAAAA, 0x55555555)
+  local b = bit64.new(0x55555555, 0xAAAAAAAA)
+
+  benchmark_op("band", function()
+    bit64.band(a, b)
+  end, iterations)
+
+  benchmark_op("bor", function()
+    bit64.bor(a, b)
+  end, iterations)
+
+  benchmark_op("bxor", function()
+    bit64.bxor(a, b)
+  end, iterations)
+
+  benchmark_op("bnot", function()
+    bit64.bnot(a)
+  end, iterations)
+
+  print("\n64-bit Shift Operations:")
+
+  benchmark_op("lshift (small)", function()
+    bit64.lshift(a, 8)
+  end, iterations)
+
+  benchmark_op("lshift (large)", function()
+    bit64.lshift(a, 40)
+  end, iterations)
+
+  benchmark_op("rshift (small)", function()
+    bit64.rshift(a, 8)
+  end, iterations)
+
+  benchmark_op("rshift (large)", function()
+    bit64.rshift(a, 40)
+  end, iterations)
+
+  benchmark_op("arshift", function()
+    bit64.arshift(bit64.new(0x80000000, 0), 8)
+  end, iterations)
+
+  print("\n64-bit Rotate Operations:")
+
+  benchmark_op("rol (small)", function()
+    bit64.rol(a, 8)
+  end, iterations)
+
+  benchmark_op("rol (large)", function()
+    bit64.rol(a, 40)
+  end, iterations)
+
+  benchmark_op("ror (small)", function()
+    bit64.ror(a, 8)
+  end, iterations)
+
+  benchmark_op("ror (large)", function()
+    bit64.ror(a, 40)
+  end, iterations)
+
+  print("\n64-bit Arithmetic:")
+
+  benchmark_op("add", function()
+    bit64.add(a, b)
+  end, iterations)
+
+  benchmark_op("add (with carry)", function()
+    bit64.add(bit64.new(0, 0xFFFFFFFF), bit64.new(0, 1))
+  end, iterations)
+
+  print("\n64-bit Byte Conversions:")
+
+  local val = bit64.new(0x12345678, 0x9ABCDEF0)
+  local bytes_be = bit64.u64_to_be_bytes(val)
+  local bytes_le = bit64.u64_to_le_bytes(val)
+
+  benchmark_op("u64_to_be_bytes", function()
+    bit64.u64_to_be_bytes(val)
+  end, iterations)
+
+  benchmark_op("u64_to_le_bytes", function()
+    bit64.u64_to_le_bytes(val)
+  end, iterations)
+
+  benchmark_op("be_bytes_to_u64", function()
+    bit64.be_bytes_to_u64(bytes_be)
+  end, iterations)
+
+  benchmark_op("le_bytes_to_u64", function()
+    bit64.le_bytes_to_u64(bytes_le)
+  end, iterations)
+
+  print("\n64-bit Utility Functions:")
+
+  benchmark_op("new", function()
+    bit64.new(0x12345678, 0x9ABCDEF0)
+  end, iterations)
+
+  benchmark_op("is_int64", function()
+    bit64.is_int64(a)
+  end, iterations)
+
+  benchmark_op("to_hex", function()
+    bit64.to_hex(a)
+  end, iterations)
+
+  benchmark_op("to_number", function()
+    bit64.to_number(a)
+  end, iterations)
+
+  benchmark_op("from_number", function()
+    bit64.from_number(12345678901234)
+  end, iterations)
+
+  benchmark_op("eq", function()
+    bit64.eq(a, b)
+  end, iterations)
+
+  benchmark_op("is_zero", function()
+    bit64.is_zero(a)
+  end, iterations)
+end
+
 return bit64
 end
 end
 
+do
+local _ENV = _ENV
+package.preload[ "bitn.utils.benchmark" ] = function( ... ) local arg = _G.arg;
+--- @module "bitn.utils.benchmark"
+--- Common benchmarking utilities for performance testing
+--- @class bitn.utils.benchmark
+local benchmark = {}
+
+--- Run a benchmarked operation with warmup and timing
+--- @param name string Operation name for display
+--- @param func function Function to benchmark
+--- @param iterations? integer Number of iterations (default: 100)
+--- @return number ms_per_op Milliseconds per operation
+function benchmark.benchmark_op(name, func, iterations)
+  iterations = iterations or 100
+
+  -- Warmup
+  for _ = 1, 3 do
+    func()
+  end
+
+  -- Actual benchmark
+  local start = os.clock()
+  for _ = 1, iterations do
+    func()
+  end
+  local elapsed = os.clock() - start
+
+  local per_op = (elapsed / iterations) * 1000 -- ms
+  local ops_per_sec = iterations / elapsed
+
+  print(string.format("%-30s: %8.3f ms/op, %8.1f ops/sec", name, per_op, ops_per_sec))
+
+  return per_op
+end
+
+return benchmark
+end
+end
+
 --- @module "bitn"
---- Pure Lua bitwise operations library.
+--- Portable bitwise operations library with automatic optimization.
 --- This library provides standalone, version-agnostic implementations of
 --- bitwise operations for 16-bit, 32-bit, and 64-bit integers. It works
---- across Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT without depending on any
---- built-in bit libraries.
+--- across Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT with zero external dependencies.
+--- Automatically uses native bit operations when available for optimal performance.
 ---
 --- @usage
 --- local bitn = require("bitn")
@@ -1910,13 +2515,16 @@ end
 ---
 --- @class bitn
 local bitn = {
+  --- @type bitn.bit16 16-bit bitwise operations
   bit16 = require("bitn.bit16"),
+  --- @type bitn.bit32 32-bit bitwise operations
   bit32 = require("bitn.bit32"),
+  --- @type bitn.bit64 64-bit bitwise operations
   bit64 = require("bitn.bit64"),
 }
 
 --- Library version (injected at build time for releases).
-local VERSION = "v0.4.1"
+local VERSION = "v0.5.1"
 
 --- Get the library version string.
 --- @return string version Version string (e.g., "v1.0.0" or "dev")

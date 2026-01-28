@@ -1,8 +1,9 @@
 --- @module "noiseprotocol.crypto.blake2"
 --- Pure Lua BLAKE2s and BLAKE2b Implementation for portability.
+--- @class noiseprotocol.crypto.blake2
 local blake2 = {}
 
-local bitn = require("vendor.bitn")
+local bitn = require("bitn")
 local bit32 = bitn.bit32
 local bit64 = bitn.bit64
 
@@ -10,6 +11,19 @@ local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
+
+-- Local references for performance (avoid module table lookups in hot loops)
+local bit32_add = bit32.add
+local bit32_bxor = bit32.bxor
+local bit32_ror = bit32.ror
+local bit64_add = bit64.add
+local bit64_xor = bit64.xor
+local bit64_ror = bit64.ror
+local bit64_new = bit64.new
+local string_byte = string.byte
+local string_char = string.char
+local string_rep = string.rep
+local table_concat = table.concat
 
 -- BLAKE2s initialization vectors (first 32 bits of fractional parts of square roots of first 8 primes)
 --- @type HashState
@@ -58,6 +72,34 @@ local BLAKE2S_SIGMA = {
 -- BLAKE2b permutation table (same as BLAKE2s)
 local BLAKE2B_SIGMA = BLAKE2S_SIGMA
 
+--- Initialize a 16-element BLAKE2s working vector with zeros
+--- @return Blake2sVector16 array Initialized array
+local function create_blake2s_vector()
+  local arr = {}
+  for i = 1, 16 do
+    arr[i] = 0
+  end
+  --- @cast arr Blake2sVector16
+  return arr
+end
+
+--- Initialize a 16-element BLAKE2b working vector with zeros
+--- @return Blake2bVector16 array Initialized array
+local function create_blake2b_vector()
+  local arr = {}
+  for i = 1, 16 do
+    arr[i] = bit64_new(0, 0)
+  end
+  --- @cast arr Blake2bVector16
+  return arr
+end
+
+-- Pre-allocated arrays for blake2s_compress() to avoid repeated allocation
+local blake2s_v = create_blake2s_vector()
+
+-- Pre-allocated arrays for blake2b_compress() to avoid repeated allocation
+local blake2b_v = create_blake2b_vector()
+
 --- BLAKE2s G function
 --- @param v Blake2sVector16 Working vector
 --- @param a integer Index a
@@ -67,14 +109,14 @@ local BLAKE2B_SIGMA = BLAKE2S_SIGMA
 --- @param x integer Message word x
 --- @param y integer Message word y
 local function blake2s_g(v, a, b, c, d, x, y)
-  v[a] = bit32.add(bit32.add(v[a], v[b]), x)
-  v[d] = bit32.ror(bit32.bxor(v[d], v[a]), 16)
-  v[c] = bit32.add(v[c], v[d])
-  v[b] = bit32.ror(bit32.bxor(v[b], v[c]), 12)
-  v[a] = bit32.add(bit32.add(v[a], v[b]), y)
-  v[d] = bit32.ror(bit32.bxor(v[d], v[a]), 8)
-  v[c] = bit32.add(v[c], v[d])
-  v[b] = bit32.ror(bit32.bxor(v[b], v[c]), 7)
+  v[a] = bit32_add(bit32_add(v[a], v[b]), x)
+  v[d] = bit32_ror(bit32_bxor(v[d], v[a]), 16)
+  v[c] = bit32_add(v[c], v[d])
+  v[b] = bit32_ror(bit32_bxor(v[b], v[c]), 12)
+  v[a] = bit32_add(bit32_add(v[a], v[b]), y)
+  v[d] = bit32_ror(bit32_bxor(v[d], v[a]), 8)
+  v[c] = bit32_add(v[c], v[d])
+  v[b] = bit32_ror(bit32_bxor(v[b], v[c]), 7)
 end
 
 --- BLAKE2b G function
@@ -86,14 +128,14 @@ end
 --- @param x table Message word x
 --- @param y table Message word y
 local function blake2b_g(v, a, b, c, d, x, y)
-  v[a] = bit64.add(bit64.add(v[a], v[b]), x)
-  v[d] = bit64.ror(bit64.xor(v[d], v[a]), 32)
-  v[c] = bit64.add(v[c], v[d])
-  v[b] = bit64.ror(bit64.xor(v[b], v[c]), 24)
-  v[a] = bit64.add(bit64.add(v[a], v[b]), y)
-  v[d] = bit64.ror(bit64.xor(v[d], v[a]), 16)
-  v[c] = bit64.add(v[c], v[d])
-  v[b] = bit64.ror(bit64.xor(v[b], v[c]), 63)
+  v[a] = bit64_add(bit64_add(v[a], v[b]), x)
+  v[d] = bit64_ror(bit64_xor(v[d], v[a]), 32)
+  v[c] = bit64_add(v[c], v[d])
+  v[b] = bit64_ror(bit64_xor(v[b], v[c]), 24)
+  v[a] = bit64_add(bit64_add(v[a], v[b]), y)
+  v[d] = bit64_ror(bit64_xor(v[d], v[a]), 16)
+  v[c] = bit64_add(v[c], v[d])
+  v[b] = bit64_ror(bit64_xor(v[b], v[c]), 63)
 end
 
 --- BLAKE2s compression function
@@ -103,9 +145,8 @@ end
 --- @param th integer Counter (high 32 bits)
 --- @param f boolean Final block flag
 local function blake2s_compress(h, m, t, th, f)
-  -- Initialize working vector
-  --- @type Blake2sVector16
-  local v = {}
+  -- Reuse pre-allocated working vector
+  local v = blake2s_v
 
   -- First half from hash state
   for i = 1, 8 do
@@ -118,10 +159,10 @@ local function blake2s_compress(h, m, t, th, f)
   end
 
   -- Mix in counter and final flag
-  v[13] = bit32.bxor(v[13], t) -- Low 32 bits of counter
-  v[14] = bit32.bxor(v[14], th) -- High 32 bits of counter
+  v[13] = bit32_bxor(v[13], t) -- Low 32 bits of counter
+  v[14] = bit32_bxor(v[14], th) -- High 32 bits of counter
   if f then
-    v[15] = bit32.bxor(v[15], 0xFFFFFFFF) -- Invert all bits for final block
+    v[15] = bit32_bxor(v[15], 0xFFFFFFFF) -- Invert all bits for final block
   end
 
   -- 10 rounds
@@ -144,7 +185,7 @@ local function blake2s_compress(h, m, t, th, f)
 
   -- Finalize
   for i = 1, 8 do
-    h[i] = bit32.bxor(bit32.bxor(h[i], v[i]), v[i + 8])
+    h[i] = bit32_bxor(bit32_bxor(h[i], v[i]), v[i + 8])
   end
 end
 
@@ -154,25 +195,24 @@ end
 --- @param t table Counter (64-bit)
 --- @param f boolean Final block flag
 local function blake2b_compress(h, m, t, f)
-  -- Initialize working vector
-  --- @type Blake2bVector16
-  local v = {}
+  -- Reuse pre-allocated working vector
+  local v = blake2b_v
 
   -- First half from hash state
   for i = 1, 8 do
-    v[i] = { h[i][1], h[i][2] }
+    v[i][1], v[i][2] = h[i][1], h[i][2]
   end
 
   -- Second half from IV
   for i = 1, 8 do
-    v[8 + i] = { BLAKE2B_IV[i][1], BLAKE2B_IV[i][2] }
+    v[8 + i][1], v[8 + i][2] = BLAKE2B_IV[i][1], BLAKE2B_IV[i][2]
   end
 
   -- Mix in counter and final flag
-  v[13] = bit64.xor(v[13], t)
-  v[14] = bit64.xor(v[14], { 0, 0 }) -- High 64 bits of counter (always 0 for messages < 2^64 bytes)
+  v[13] = bit64_xor(v[13], t)
+  v[14] = bit64_xor(v[14], bit64_new(0, 0)) -- High 64 bits of counter (always 0 for messages < 2^64 bytes)
   if f then
-    v[15] = bit64.xor(v[15], { 0xffffffff, 0xffffffff })
+    v[15] = bit64_xor(v[15], bit64_new(0xffffffff, 0xffffffff))
   end
 
   -- 12 rounds
@@ -195,7 +235,7 @@ local function blake2b_compress(h, m, t, f)
 
   -- Finalize
   for i = 1, 8 do
-    h[i] = bit64.xor(bit64.xor(h[i], v[i]), v[i + 8])
+    h[i] = bit64_xor(bit64_xor(h[i], v[i]), v[i + 8])
   end
 end
 
@@ -220,7 +260,7 @@ function blake2.blake2s(data)
   -- Parameter block: digest length = 32, key length = 0, fanout = 1, depth = 1
   -- All other parameters are 0 (no salt, no personalization, etc.)
   local param = 32 + (0 * 256) + (1 * 65536) + (1 * 16777216) -- 0x01010020
-  h[1] = bit32.bxor(h[1], param)
+  h[1] = bit32_bxor(h[1], param)
 
   local data_len = #data
   local offset = 1
@@ -253,7 +293,7 @@ function blake2.blake2s(data)
 
     -- Pad final block with zeros
     local final_data = data:sub(offset)
-    local final_block = final_data .. string.rep("\0", 64 - remaining)
+    local final_block = final_data .. string_rep("\0", 64 - remaining)
 
     --- @type Blake2sVector16
     local m = {}
@@ -279,7 +319,7 @@ function blake2.blake2s(data)
     result_bytes[i] = bytes.u32_to_le_bytes(h[i])
   end
 
-  return table.concat(result_bytes)
+  return table_concat(result_bytes)
 end
 
 --- Compute BLAKE2b hash of input data
@@ -307,15 +347,15 @@ function blake2.blake2b(data)
   -- In little-endian 64-bit: 0x0000000001010040
   -- Split into two 32-bit words (little-endian): low=0x01010040, high=0x00000000
   -- But our u64 format is {high, low}, so we need {0x00000000, 0x01010040}
-  h[1] = bit64.xor(h[1], { 0x00000000, 0x01010040 })
+  h[1] = bit64_xor(h[1], bit64_new(0x00000000, 0x01010040))
 
   local data_len = #data
   local offset = 1
-  local counter = { 0, 0 }
+  local counter = bit64_new(0, 0)
 
   -- Process full 128-byte blocks
   while offset + 127 <= data_len do
-    counter = bit64.add(counter, { 0, 128 })
+    counter = bit64_add(counter, bit64_new(0, 128))
 
     -- Check if this is the last block
     local is_last_block = (offset + 128 > data_len)
@@ -334,10 +374,10 @@ function blake2.blake2b(data)
   -- Process final block (if there's remaining data)
   local remaining = data_len - offset + 1
   if remaining > 0 then
-    counter = bit64.add(counter, { 0, remaining })
+    counter = bit64_add(counter, bit64_new(0, remaining))
 
     -- Pad final block with zeros
-    local final_block = data:sub(offset) .. string.rep("\0", 128 - remaining)
+    local final_block = data:sub(offset) .. string_rep("\0", 128 - remaining)
 
     --- @type Blake2bVector16
     local m = {}
@@ -351,9 +391,9 @@ function blake2.blake2b(data)
     --- @type Blake2bVector16
     local m = {}
     for i = 1, 16 do
-      m[i] = { 0, 0 }
+      m[i] = bit64_new(0, 0)
     end
-    blake2b_compress(h, m, { 0, 0 }, true)
+    blake2b_compress(h, m, bit64_new(0, 0), true)
   end
 
   -- Produce final hash value as binary string (optimized with table)
@@ -362,7 +402,7 @@ function blake2.blake2b(data)
     result_bytes[i] = bytes.u64_to_le_bytes(h[i])
   end
 
-  return table.concat(result_bytes)
+  return table_concat(result_bytes)
 end
 
 --- Compute BLAKE2s hash and return as hex string
@@ -403,19 +443,19 @@ function blake2.hmac_blake2s(key, data)
 
   -- Keys shorter than blocksize are right-padded with zeros
   if #key < block_size then
-    key = key .. string.rep("\0", block_size - #key)
+    key = key .. string_rep("\0", block_size - #key)
   end
 
   -- Compute inner and outer padding (optimized with table)
   local ipad_bytes = {}
   local opad_bytes = {}
   for i = 1, block_size do
-    local byte = string.byte(key, i)
-    ipad_bytes[i] = string.char(bit32.bxor(byte, 0x36))
-    opad_bytes[i] = string.char(bit32.bxor(byte, 0x5C))
+    local byte = string_byte(key, i)
+    ipad_bytes[i] = string_char(bit32_bxor(byte, 0x36))
+    opad_bytes[i] = string_char(bit32_bxor(byte, 0x5C))
   end
-  local ipad = table.concat(ipad_bytes)
-  local opad = table.concat(opad_bytes)
+  local ipad = table_concat(ipad_bytes)
+  local opad = table_concat(opad_bytes)
 
   -- Compute HMAC = H(opad || H(ipad || data))
   local inner_hash = blake2.blake2s(ipad .. data)
@@ -446,19 +486,19 @@ function blake2.hmac_blake2b(key, data)
 
   -- Keys shorter than blocksize are right-padded with zeros
   if #key < block_size then
-    key = key .. string.rep("\0", block_size - #key)
+    key = key .. string_rep("\0", block_size - #key)
   end
 
   -- Compute inner and outer padding (optimized with table)
   local ipad_bytes = {}
   local opad_bytes = {}
   for i = 1, block_size do
-    local byte = string.byte(key, i)
-    ipad_bytes[i] = string.char(bit32.bxor(byte, 0x36))
-    opad_bytes[i] = string.char(bit32.bxor(byte, 0x5C))
+    local byte = string_byte(key, i)
+    ipad_bytes[i] = string_char(bit32_bxor(byte, 0x36))
+    opad_bytes[i] = string_char(bit32_bxor(byte, 0x5C))
   end
-  local ipad = table.concat(ipad_bytes)
-  local opad = table.concat(opad_bytes)
+  local ipad = table_concat(ipad_bytes)
+  local opad = table_concat(opad_bytes)
 
   -- Compute HMAC = H(opad || H(ipad || data))
   local inner_hash = blake2.blake2b(ipad .. data)
@@ -536,7 +576,7 @@ local hmac_blake2s_test_vectors = {
   },
   {
     name = "RFC 4231 Test Case 1 pattern",
-    key = string.rep(string.char(0x0b), 20),
+    key = string_rep(string_char(0x0b), 20),
     message = "Hi There",
     expected = "65a8b7c5cc9136d424e82c37e2707e74e913c0655b99c75f40edf387453a3260",
   },
@@ -548,13 +588,13 @@ local hmac_blake2s_test_vectors = {
   },
   {
     name = "Key = block size (64 bytes)",
-    key = string.rep("a", 64),
+    key = string_rep("a", 64),
     message = "Test message",
     expected = "12d0e782ae473d8007d33ae6e5244afcaf9239f6a7d5476c69060c01383d6b58",
   },
   {
     name = "Key > block size (80 bytes)",
-    key = string.rep("a", 80),
+    key = string_rep("a", 80),
     message = "Test message",
     expected = "41da357bda1107f9fad1a504b5afbe75f5ead5ed7cf8f82e59e18c5e9e653882",
   },
@@ -575,7 +615,7 @@ local hmac_blake2b_test_vectors = {
   },
   {
     name = "RFC 4231 Test Case 1 pattern",
-    key = string.rep(string.char(0x0b), 20),
+    key = string_rep(string_char(0x0b), 20),
     message = "Hi There",
     expected = "358a6a184924894fc34bee5680eedf57d84a37bb38832f288e3b27dc63a98cc8c91e76da476b508bc6b2d408a248857452906e4a20b48c6b4b55d2df0fe1dd24",
   },
@@ -587,13 +627,13 @@ local hmac_blake2b_test_vectors = {
   },
   {
     name = "Key = block size (128 bytes)",
-    key = string.rep("a", 128),
+    key = string_rep("a", 128),
     message = "Test message",
     expected = "021a22a3ecf0f1f7a15aca6a5d9704fc99b6a84a627fa53f7ac932a961ffb69b1e68c46981d5b44fd00a7cae75e4ee63d393eec844a8de2dd00e45b5a0d4e275",
   },
   {
     name = "Key > block size (80 bytes)",
-    key = string.rep("a", 80),
+    key = string_rep("a", 80),
     message = "Test message",
     expected = "1c8fb6f426d7800000e8d03c141905b33d10a4da16f9c018140955c5cedfa7a017204aaea1f141c1c0d3d942dee04a795a6e589898c1328b717ad6053a7b4790",
   },
@@ -745,9 +785,9 @@ end
 --- including BLAKE2s and BLAKE2b hash computation for various message sizes.
 function blake2.benchmark()
   -- Test data
-  local message_64 = string.rep("a", 64)
-  local message_1k = string.rep("a", 1024)
-  local message_8k = string.rep("a", 8192)
+  local message_64 = string_rep("a", 64)
+  local message_1k = string_rep("a", 1024)
+  local message_8k = string_rep("a", 8192)
   local hmac_key = "benchmark_key"
 
   print("BLAKE2s Hash Operations:")

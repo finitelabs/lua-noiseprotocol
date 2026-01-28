@@ -1,13 +1,28 @@
 --- @module "noiseprotocol.crypto.sha256"
 --- Pure Lua SHA-256 Implementation for portability.
+--- @class noiseprotocol.crypto.sha256
 local sha256 = {}
 
-local bit32 = require("vendor.bitn").bit32
+local bit32 = require("bitn").bit32
 
 local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
+
+-- Local references for performance (avoid global/module table lookups in hot loops)
+local bit32_bxor = bit32.bxor
+local bit32_band = bit32.band
+local bit32_bnot = bit32.bnot
+local bit32_ror = bit32.ror
+local bit32_rshift = bit32.rshift
+local bit32_add = bit32.add
+local bytes_be_bytes_to_u32 = bytes.be_bytes_to_u32
+local bytes_u32_to_be_bytes = bytes.u32_to_be_bytes
+local string_char = string.char
+local string_rep = string.rep
+local string_byte = string.byte
+local table_concat = table.concat
 
 -- SHA-256 constants (first 32 bits of fractional parts of cube roots of first 64 primes)
 --- @type integer[64]
@@ -93,59 +108,72 @@ local H0 = {
   0x5be0cd19,
 }
 
+--- Initialize a 64-element message schedule array with zeros
+--- @return integer[] array Initialized array
+local function create_message_schedule()
+  local arr = {}
+  for i = 1, 64 do
+    arr[i] = 0
+  end
+  return arr
+end
+
+-- Pre-allocated message schedule array for sha256_chunk()
+local chunk_W = create_message_schedule()
+
 --- SHA-256 core compression function
 --- @param chunk string 64-byte chunk
 --- @param H HashState Hash state (8 integers)
 local function sha256_chunk(chunk, H)
-  -- Prepare message schedule W (pre-allocate full array)
-  local W = {}
+  -- Reuse pre-allocated message schedule W
+  local W = chunk_W
 
-  -- First 16 words are the message chunk
+  -- First 16 words are the message chunk (use local reference)
   for i = 1, 16 do
-    W[i] = bytes.be_bytes_to_u32(chunk, (i - 1) * 4 + 1)
+    W[i] = bytes_be_bytes_to_u32(chunk, (i - 1) * 4 + 1)
   end
 
   -- Extend the first 16 words into the remaining 48 words
   for i = 17, 64 do
     local w15 = W[i - 15]
     local w2 = W[i - 2]
-    local s0 = bit32.bxor(bit32.ror(w15, 7), bit32.bxor(bit32.ror(w15, 18), bit32.rshift(w15, 3)))
-    local s1 = bit32.bxor(bit32.ror(w2, 17), bit32.bxor(bit32.ror(w2, 19), bit32.rshift(w2, 10)))
-    W[i] = bit32.add(bit32.add(bit32.add(W[i - 16], s0), W[i - 7]), s1)
+    local s0 = bit32_bxor(bit32_ror(w15, 7), bit32_bxor(bit32_ror(w15, 18), bit32_rshift(w15, 3)))
+    local s1 = bit32_bxor(bit32_ror(w2, 17), bit32_bxor(bit32_ror(w2, 19), bit32_rshift(w2, 10)))
+    W[i] = bit32_add(bit32_add(bit32_add(W[i - 16], s0), W[i - 7]), s1)
   end
 
   -- Initialize working variables
   local a, b, c, d, e, f, g, h = H[1], H[2], H[3], H[4], H[5], H[6], H[7], H[8]
 
-  -- Main loop (optimized with local variables)
+  -- Main loop (optimized with local references)
   for i = 1, 64 do
-    local prime = K[i]
-    local S1 = bit32.bxor(bit32.ror(e, 6), bit32.bxor(bit32.ror(e, 11), bit32.ror(e, 25)))
-    local ch = bit32.bxor(bit32.band(e, f), bit32.band(bit32.bnot(e), g))
-    local temp1 = bit32.add(bit32.add(bit32.add(bit32.add(h, S1), ch), prime), W[i])
-    local S0 = bit32.bxor(bit32.ror(a, 2), bit32.bxor(bit32.ror(a, 13), bit32.ror(a, 22)))
-    local maj = bit32.bxor(bit32.band(a, b), bit32.bxor(bit32.band(a, c), bit32.band(b, c)))
-    local temp2 = bit32.add(S0, maj)
+    local ki = K[i]
+    local S1 = bit32_bxor(bit32_ror(e, 6), bit32_bxor(bit32_ror(e, 11), bit32_ror(e, 25)))
+    local ch = bit32_bxor(bit32_band(e, f), bit32_band(bit32_bnot(e), g))
+    local temp1 = bit32_add(bit32_add(bit32_add(bit32_add(h, S1), ch), ki), W[i])
+    local S0 = bit32_bxor(bit32_ror(a, 2), bit32_bxor(bit32_ror(a, 13), bit32_ror(a, 22)))
+    local maj = bit32_bxor(bit32_band(a, b), bit32_bxor(bit32_band(a, c), bit32_band(b, c)))
+    local temp2 = bit32_add(S0, maj)
 
     h = g
     g = f
     f = e
-    e = bit32.add(d, temp1)
+    e = bit32_add(d, temp1)
     d = c
     c = b
     b = a
-    a = bit32.add(temp1, temp2)
+    a = bit32_add(temp1, temp2)
   end
 
   -- Add compressed chunk to current hash value
-  H[1] = bit32.add(H[1], a)
-  H[2] = bit32.add(H[2], b)
-  H[3] = bit32.add(H[3], c)
-  H[4] = bit32.add(H[4], d)
-  H[5] = bit32.add(H[5], e)
-  H[6] = bit32.add(H[6], f)
-  H[7] = bit32.add(H[7], g)
-  H[8] = bit32.add(H[8], h)
+  H[1] = bit32_add(H[1], a)
+  H[2] = bit32_add(H[2], b)
+  H[3] = bit32_add(H[3], c)
+  H[4] = bit32_add(H[4], d)
+  H[5] = bit32_add(H[5], e)
+  H[6] = bit32_add(H[6], f)
+  H[7] = bit32_add(H[7], g)
+  H[8] = bit32_add(H[8], h)
 end
 
 -- ============================================================================
@@ -172,18 +200,18 @@ function sha256.sha256(data)
   local msg_len_bits = msg_len * 8
 
   -- Append '1' bit (plus zero padding to make it a byte)
-  data = data .. string.char(0x80)
+  data = data .. string_char(0x80)
 
   -- Append zeros to make message length ≡ 448 (mod 512) bits = 56 (mod 64) bytes
   -- Current length is msg_len + 1 (for the 0x80 byte)
   local current_len = msg_len + 1
   local target_len = 56 -- We want to reach 56 bytes before adding the 8-byte length
   local padding_len = (target_len - current_len) % 64
-  data = data .. string.rep("\0", padding_len)
+  data = data .. string_rep("\0", padding_len)
 
   -- Append original length as 64-bit big-endian integer
   -- For simplicity, we only support messages < 2^32 bits
-  data = data .. string.rep("\0", 4) .. bytes.u32_to_be_bytes(msg_len_bits)
+  data = data .. string_rep("\0", 4) .. bytes_u32_to_be_bytes(msg_len_bits)
 
   -- Process message in 64-byte chunks
   for i = 1, #data, 64 do
@@ -196,10 +224,10 @@ function sha256.sha256(data)
   -- Produce final hash value as binary string (optimized with table)
   local result_bytes = {}
   for i = 1, 8 do
-    result_bytes[i] = bytes.u32_to_be_bytes(H[i])
+    result_bytes[i] = bytes_u32_to_be_bytes(H[i])
   end
 
-  return table.concat(result_bytes)
+  return table_concat(result_bytes)
 end
 
 --- Compute SHA-256 hash and return as hex string
@@ -231,19 +259,19 @@ function sha256.hmac_sha256(key, data)
 
   -- Keys shorter than blocksize are right-padded with zeros
   if #key < block_size then
-    key = key .. string.rep("\0", block_size - #key)
+    key = key .. string_rep("\0", block_size - #key)
   end
 
-  -- Compute inner and outer padding (optimized with table)
+  -- Compute inner and outer padding (optimized with local references)
   local ipad_bytes = {}
   local opad_bytes = {}
   for i = 1, block_size do
-    local byte = string.byte(key, i)
-    ipad_bytes[i] = string.char(bit32.bxor(byte, 0x36))
-    opad_bytes[i] = string.char(bit32.bxor(byte, 0x5C))
+    local byte = string_byte(key, i)
+    ipad_bytes[i] = string_char(bit32_bxor(byte, 0x36))
+    opad_bytes[i] = string_char(bit32_bxor(byte, 0x5C))
   end
-  local ipad = table.concat(ipad_bytes)
-  local opad = table.concat(opad_bytes)
+  local ipad = table_concat(ipad_bytes)
+  local opad = table_concat(opad_bytes)
 
   -- Compute HMAC = H(opad || H(ipad || data))
   local inner_hash = sha256.sha256(ipad .. data)
@@ -304,7 +332,7 @@ local test_vectors = {
 if os.getenv("INCLUDE_SLOW_TESTS") == "1" then
   table.insert(test_vectors, {
     name = "Million 'a' characters",
-    input = string.rep("a", 1000000),
+    input = string_rep("a", 1000000),
     expected = "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0",
   })
 end
@@ -313,7 +341,7 @@ end
 local hmac_test_vectors = {
   {
     name = "HMAC Test Case 1",
-    key = string.rep(string.char(0x0b), 20),
+    key = string_rep(string_char(0x0b), 20),
     data = "Hi There",
     expected = "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7",
   },
@@ -325,8 +353,8 @@ local hmac_test_vectors = {
   },
   {
     name = "HMAC Test Case 3",
-    key = string.rep(string.char(0xaa), 20),
-    data = string.rep(string.char(0xdd), 50),
+    key = string_rep(string_char(0xaa), 20),
+    data = string_rep(string_char(0xdd), 50),
     expected = "773ea91e36800e46854db8ebd09181a72959098b3ef8c122d9635514ced565fe",
   },
 }
@@ -446,9 +474,9 @@ end
 --- including hash computation and HMAC for various message sizes.
 function sha256.benchmark()
   -- Test data
-  local message_64 = string.rep("a", 64)
-  local message_1k = string.rep("a", 1024)
-  local message_8k = string.rep("a", 8192)
+  local message_64 = string_rep("a", 64)
+  local message_1k = string_rep("a", 1024)
+  local message_8k = string_rep("a", 8192)
   local hmac_key = "benchmark_key"
 
   print("Hash Operations:")

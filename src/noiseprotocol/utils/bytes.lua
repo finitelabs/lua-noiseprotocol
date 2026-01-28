@@ -1,8 +1,11 @@
 --- @module "noiseprotocol.utils.bytes"
 --- Byte manipulation and conversion utilities
+--- @class noiseprotocol.utils.bytes
 local bytes = {}
 
-local bit32 = require("vendor.bitn").bit32
+local bitn = require("bitn")
+local bit32 = bitn.bit32
+local bit64 = bitn.bit64
 
 --- Convert binary string to hexadecimal string
 --- @param str string Binary string
@@ -39,7 +42,7 @@ function bytes.u32_to_be_bytes(n)
 end
 
 --- Convert 64-bit value to 8 bytes (big-endian)
---- @param x Int64HighLow|table {high, low} 64-bit value
+--- @param x Int64HighLow {high, low} 64-bit value
 --- @return string bytes 8-byte string in big-endian order
 function bytes.u64_to_be_bytes(x)
   local high, low = x[1], x[2]
@@ -47,7 +50,7 @@ function bytes.u64_to_be_bytes(x)
 end
 
 --- Convert 64-bit value to 8 bytes (little-endian)
---- @param x Int64HighLow|table|integer {high, low} 64-bit value or simple integer
+--- @param x Int64HighLow|integer {high, low} 64-bit value or simple integer
 --- @return string bytes 8-byte string in little-endian order
 function bytes.u64_to_le_bytes(x)
   -- Handle simple integer case (< 2^53)
@@ -313,7 +316,7 @@ function bytes.selftest()
     {
       name = "u64 LE - basic table",
       test = function()
-        local n = { 0x12345678, 0x9ABCDEF0 }
+        local n = bit64.new(0x12345678, 0x9ABCDEF0)
         local bytes_str = bytes.u64_to_le_bytes(n)
         local back = bytes.le_bytes_to_u64(bytes_str)
         local b1, b2, b3, b4, b5, b6, b7, b8 = string.byte(bytes_str, 1, 8)
@@ -344,7 +347,7 @@ function bytes.selftest()
     {
       name = "u64 LE - zero",
       test = function()
-        local n = { 0, 0 }
+        local n = bit64.new(0, 0)
         local bytes_str = bytes.u64_to_le_bytes(n)
         local back = bytes.le_bytes_to_u64(bytes_str)
         return back[1] == 0 and back[2] == 0 and bytes_str == string.rep(string.char(0), 8)
@@ -353,7 +356,7 @@ function bytes.selftest()
     {
       name = "u64 LE - max value",
       test = function()
-        local n = { 0xFFFFFFFF, 0xFFFFFFFF }
+        local n = bit64.new(0xFFFFFFFF, 0xFFFFFFFF)
         local bytes_str = bytes.u64_to_le_bytes(n)
         local back = bytes.le_bytes_to_u64(bytes_str)
         return back[1] == 0xFFFFFFFF and back[2] == 0xFFFFFFFF and bytes_str == string.rep(string.char(0xFF), 8)
@@ -362,7 +365,7 @@ function bytes.selftest()
     {
       name = "u64 LE - high word only",
       test = function()
-        local n = { 0x12345678, 0 }
+        local n = bit64.new(0x12345678, 0)
         local bytes_str = bytes.u64_to_le_bytes(n)
         local back = bytes.le_bytes_to_u64(bytes_str)
         return back[1] == 0x12345678 and back[2] == 0
@@ -371,7 +374,7 @@ function bytes.selftest()
     {
       name = "u64 LE - low word only",
       test = function()
-        local n = { 0, 0x12345678 }
+        local n = bit64.new(0, 0x12345678)
         local bytes_str = bytes.u64_to_le_bytes(n)
         local back = bytes.le_bytes_to_u64(bytes_str)
         return back[1] == 0 and back[2] == 0x12345678
@@ -380,7 +383,7 @@ function bytes.selftest()
     {
       name = "u64 LE - with offset",
       test = function()
-        local data = "XXX" .. bytes.u64_to_le_bytes({ 0x12345678, 0x9ABCDEF0 }) .. "YYY"
+        local data = "XXX" .. bytes.u64_to_le_bytes(bit64.new(0x12345678, 0x9ABCDEF0)) .. "YYY"
         local n = bytes.le_bytes_to_u64(data, 4)
         return n[1] == 0x12345678 and n[2] == 0x9ABCDEF0
       end,
@@ -388,7 +391,7 @@ function bytes.selftest()
     {
       name = "u64 BE - basic",
       test = function()
-        local n = { 0x12345678, 0x9ABCDEF0 }
+        local n = bit64.new(0x12345678, 0x9ABCDEF0)
         local bytes_str = bytes.u64_to_be_bytes(n)
         local back = bytes.be_bytes_to_u64(bytes_str)
         local b1, b2, b3, b4, b5, b6, b7, b8 = string.byte(bytes_str, 1, 8)
@@ -407,7 +410,7 @@ function bytes.selftest()
     {
       name = "u64 BE - zero",
       test = function()
-        local n = { 0, 0 }
+        local n = bit64.new(0, 0)
         local bytes_str = bytes.u64_to_be_bytes(n)
         local back = bytes.be_bytes_to_u64(bytes_str)
         return back[1] == 0 and back[2] == 0 and bytes_str == string.rep(string.char(0), 8)
@@ -416,7 +419,7 @@ function bytes.selftest()
     {
       name = "u64 BE - with offset",
       test = function()
-        local data = "XXX" .. bytes.u64_to_be_bytes({ 0x12345678, 0x9ABCDEF0 }) .. "YYY"
+        local data = "XXX" .. bytes.u64_to_be_bytes(bit64.new(0x12345678, 0x9ABCDEF0)) .. "YYY"
         local n = bytes.be_bytes_to_u64(data, 4)
         return n[1] == 0x12345678 and n[2] == 0x9ABCDEF0
       end,
@@ -602,35 +605,35 @@ function bytes.selftest()
       name = "u32 LE - insufficient bytes",
       test = function()
         local ok, err = pcall(bytes.le_bytes_to_u32, "XX")
-        return not ok and err:match("Insufficient bytes")
+        return not ok and type(err) == "string" and err:match("Insufficient bytes")
       end,
     },
     {
       name = "u32 BE - insufficient bytes",
       test = function()
         local ok, err = pcall(bytes.be_bytes_to_u32, "XX")
-        return not ok and err:match("Insufficient bytes")
+        return not ok and type(err) == "string" and err:match("Insufficient bytes")
       end,
     },
     {
       name = "u64 LE - insufficient bytes",
       test = function()
         local ok, err = pcall(bytes.le_bytes_to_u64, "XXXXXX")
-        return not ok and err:match("Insufficient bytes")
+        return not ok and type(err) == "string" and err:match("Insufficient bytes")
       end,
     },
     {
       name = "u64 BE - insufficient bytes",
       test = function()
         local ok, err = pcall(bytes.be_bytes_to_u64, "XXXXXX")
-        return not ok and err:match("Insufficient bytes")
+        return not ok and type(err) == "string" and err:match("Insufficient bytes")
       end,
     },
     {
       name = "xor - length mismatch",
       test = function()
         local ok, err = pcall(bytes.xor_bytes, "abc", "abcd")
-        return not ok and err:match("same length")
+        return not ok and type(err) == "string" and err:match("same length")
       end,
     },
   }

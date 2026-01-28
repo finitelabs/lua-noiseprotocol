@@ -17,6 +17,7 @@
 ---
 --- Note: X25519 and X448 currently use native implementations only as they are
 --- not currently supported by lua-openssl.
+--- @class noiseprotocol.openssl_wrapper
 local openssl_wrapper = {}
 
 --- OpenSSL Feature Enum

@@ -1,5 +1,6 @@
 --- @module "noiseprotocol.utils.benchmark"
 --- Common benchmarking utilities for performance testing
+--- @class noiseprotocol.utils.benchmark
 local benchmark = {}
 
 --- Run a benchmarked operation with warmup and timing

@@ -1,8 +1,9 @@
 --- @module "noiseprotocol.crypto.sha512"
 --- Pure Lua SHA-512 Implementation for portability.
+--- @class noiseprotocol.crypto.sha512
 local sha512 = {}
 
-local bitn = require("vendor.bitn")
+local bitn = require("bitn")
 local bit32 = bitn.bit32
 local bit64 = bitn.bit64
 
@@ -10,6 +11,21 @@ local openssl_wrapper = require("noiseprotocol.openssl_wrapper")
 local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
+
+-- Local references for performance (avoid module table lookups in hot loops)
+local bit64_add = bit64.add
+local bit64_xor = bit64.xor
+local bit64_band = bit64.band
+local bit64_bnot = bit64.bnot
+local bit64_ror = bit64.ror
+local bit64_shr = bit64.shr
+local bit64_new = bit64.new
+local bit32_bxor = bit32.bxor
+local string_char = string.char
+local string_rep = string.rep
+local string_byte = string.byte
+local table_concat = table.concat
+local floor = math.floor
 
 -- SHA-512 uses 64-bit words, but Lua numbers are limited to 2^53-1
 -- We'll work with 32-bit high/low pairs for 64-bit arithmetic
@@ -114,32 +130,45 @@ local H0 = {
   { 0x5be0cd19, 0x137e2179 },
 }
 
+--- Initialize an 80-element message schedule array with zeros (64-bit values)
+--- @return Int64HighLow[] array Initialized array
+local function create_message_schedule_64()
+  local arr = {}
+  for i = 1, 80 do
+    arr[i] = bit64_new(0, 0)
+  end
+  return arr
+end
+
+-- Pre-allocated message schedule array for sha512_chunk()
+local chunk_W = create_message_schedule_64()
+
 --- SHA-512 Sigma0 function
 --- @param x Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function Sigma0(x)
-  return bit64.xor(bit64.xor(bit64.ror(x, 28), bit64.ror(x, 34)), bit64.ror(x, 39))
+  return bit64_xor(bit64_xor(bit64_ror(x, 28), bit64_ror(x, 34)), bit64_ror(x, 39))
 end
 
 --- SHA-512 Sigma1 function
 --- @param x Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function Sigma1(x)
-  return bit64.xor(bit64.xor(bit64.ror(x, 14), bit64.ror(x, 18)), bit64.ror(x, 41))
+  return bit64_xor(bit64_xor(bit64_ror(x, 14), bit64_ror(x, 18)), bit64_ror(x, 41))
 end
 
 --- SHA-512 sigma0 function
 --- @param x Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function sigma0(x)
-  return bit64.xor(bit64.xor(bit64.ror(x, 1), bit64.ror(x, 8)), bit64.shr(x, 7))
+  return bit64_xor(bit64_xor(bit64_ror(x, 1), bit64_ror(x, 8)), bit64_shr(x, 7))
 end
 
 --- SHA-512 sigma1 function
 --- @param x Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function sigma1(x)
-  return bit64.xor(bit64.xor(bit64.ror(x, 19), bit64.ror(x, 61)), bit64.shr(x, 6))
+  return bit64_xor(bit64_xor(bit64_ror(x, 19), bit64_ror(x, 61)), bit64_shr(x, 6))
 end
 
 --- SHA-512 Ch function
@@ -148,7 +177,7 @@ end
 --- @param z Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function Ch(x, y, z)
-  return bit64.xor(bit64.band(x, y), bit64.band(bit64.bnot(x), z))
+  return bit64_xor(bit64_band(x, y), bit64_band(bit64_bnot(x), z))
 end
 
 --- SHA-512 Maj function
@@ -157,19 +186,20 @@ end
 --- @param z Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function Maj(x, y, z)
-  return bit64.xor(bit64.xor(bit64.band(x, y), bit64.band(x, z)), bit64.band(y, z))
+  return bit64_xor(bit64_xor(bit64_band(x, y), bit64_band(x, z)), bit64_band(y, z))
 end
 
 --- SHA-512 core compression function
 --- @param chunk string 128-byte chunk
 --- @param H HashState64 Hash state (8 64-bit values)
 local function sha512_chunk(chunk, H)
-  -- Prepare message schedule W (pre-allocate full array)
-  local W = {}
+  -- Reuse pre-allocated message schedule W
+  local W = chunk_W
 
   -- First 16 words are the message chunk
   for i = 1, 16 do
-    W[i] = bytes.be_bytes_to_u64(chunk, (i - 1) * 8 + 1)
+    local val = bytes.be_bytes_to_u64(chunk, (i - 1) * 8 + 1)
+    W[i][1], W[i][2] = val[1], val[2]
   end
 
   -- Extend the first 16 words into the remaining 64 words
@@ -178,7 +208,8 @@ local function sha512_chunk(chunk, H)
     local w2 = W[i - 2]
     local s0 = sigma0(w15)
     local s1 = sigma1(w2)
-    W[i] = bit64.add(bit64.add(bit64.add(W[i - 16], s0), W[i - 7]), s1)
+    local result = bit64_add(bit64_add(bit64_add(W[i - 16], s0), W[i - 7]), s1)
+    W[i][1], W[i][2] = result[1], result[2]
   end
 
   -- Initialize working variables
@@ -189,30 +220,30 @@ local function sha512_chunk(chunk, H)
     local prime = K[i]
     local S1 = Sigma1(e)
     local ch = Ch(e, f, g)
-    local temp1 = bit64.add(bit64.add(bit64.add(bit64.add(h, S1), ch), prime), W[i])
+    local temp1 = bit64_add(bit64_add(bit64_add(bit64_add(h, S1), ch), prime), W[i])
     local S0 = Sigma0(a)
     local maj = Maj(a, b, c)
-    local temp2 = bit64.add(S0, maj)
+    local temp2 = bit64_add(S0, maj)
 
     h = g
     g = f
     f = e
-    e = bit64.add(d, temp1)
+    e = bit64_add(d, temp1)
     d = c
     c = b
     b = a
-    a = bit64.add(temp1, temp2)
+    a = bit64_add(temp1, temp2)
   end
 
   -- Add compressed chunk to current hash value
-  H[1] = bit64.add(H[1], a)
-  H[2] = bit64.add(H[2], b)
-  H[3] = bit64.add(H[3], c)
-  H[4] = bit64.add(H[4], d)
-  H[5] = bit64.add(H[5], e)
-  H[6] = bit64.add(H[6], f)
-  H[7] = bit64.add(H[7], g)
-  H[8] = bit64.add(H[8], h)
+  H[1] = bit64_add(H[1], a)
+  H[2] = bit64_add(H[2], b)
+  H[3] = bit64_add(H[3], c)
+  H[4] = bit64_add(H[4], d)
+  H[5] = bit64_add(H[5], e)
+  H[6] = bit64_add(H[6], f)
+  H[7] = bit64_add(H[7], g)
+  H[8] = bit64_add(H[8], h)
 end
 
 --- Compute SHA-512 hash of input data
@@ -238,19 +269,19 @@ function sha512.sha512(data)
   local msg_len_bits = msg_len * 8
 
   -- Append '1' bit (plus zero padding to make it a byte)
-  data = data .. string.char(0x80)
+  data = data .. string_char(0x80)
 
   -- Append zeros to make message length ≡ 896 (mod 1024) bits = 112 (mod 128) bytes
   local current_len = msg_len + 1
   local target_len = 112 -- We want to reach 112 bytes before adding the 16-byte length
   local padding_len = (target_len - current_len) % 128
-  data = data .. string.rep("\0", padding_len)
+  data = data .. string_rep("\0", padding_len)
 
   -- Append original length as 128-bit big-endian integer
   -- For simplicity, we only support messages < 2^64 bits
-  data = data .. string.rep("\0", 8) -- High 64 bits (always 0)
+  data = data .. string_rep("\0", 8) -- High 64 bits (always 0)
   -- Low 64 bits of length
-  local len_high = math.floor(msg_len_bits / 0x100000000)
+  local len_high = floor(msg_len_bits / 0x100000000)
   local len_low = msg_len_bits % 0x100000000
   data = data .. bytes.u64_to_be_bytes({ len_high, len_low })
 
@@ -268,7 +299,7 @@ function sha512.sha512(data)
     result_bytes[i] = bytes.u64_to_be_bytes(H[i])
   end
 
-  return table.concat(result_bytes)
+  return table_concat(result_bytes)
 end
 
 --- Compute SHA-512 hash and return as hex string
@@ -299,19 +330,19 @@ function sha512.hmac_sha512(key, data)
 
   -- Keys shorter than blocksize are right-padded with zeros
   if #key < block_size then
-    key = key .. string.rep("\0", block_size - #key)
+    key = key .. string_rep("\0", block_size - #key)
   end
 
   -- Compute inner and outer padding (optimized with table)
   local ipad_bytes = {}
   local opad_bytes = {}
   for i = 1, block_size do
-    local byte = string.byte(key, i)
-    ipad_bytes[i] = string.char(bit32.bxor(byte, 0x36))
-    opad_bytes[i] = string.char(bit32.bxor(byte, 0x5C))
+    local byte = string_byte(key, i)
+    ipad_bytes[i] = string_char(bit32_bxor(byte, 0x36))
+    opad_bytes[i] = string_char(bit32_bxor(byte, 0x5C))
   end
-  local ipad = table.concat(ipad_bytes)
-  local opad = table.concat(opad_bytes)
+  local ipad = table_concat(ipad_bytes)
+  local opad = table_concat(opad_bytes)
 
   -- Compute HMAC = H(opad || H(ipad || data))
   local inner_hash = sha512.sha512(ipad .. data)
@@ -352,7 +383,7 @@ local test_vectors = {
 if os.getenv("INCLUDE_SLOW_TESTS") == "1" then
   table.insert(test_vectors, {
     name = "RFC 4634 Test 5 - One million 'a' characters",
-    input = string.rep("a", 1000000),
+    input = string_rep("a", 1000000),
     expected = "e718483d0ce769644e2e42c7bc15b4638e1f98b13b2044285632a803afa973ebde0ff244877ea60a4cb0432ce577c31beb009c5c2c49aa2e4eadb217ad8cc09b",
   })
 end
@@ -361,7 +392,7 @@ end
 local hmac_test_vectors = {
   {
     name = "RFC 4231 Test Case 1",
-    key = string.rep(string.char(0x0b), 20),
+    key = string_rep(string_char(0x0b), 20),
     data = "Hi There",
     expected = "87aa7cdea5ef619d4ff0b4241a1d6cb02379f4e2ce4ec2787ad0b30545e17cdedaa833b7d6b8a702038b274eaea3f4e4be9d914eeb61f1702e696c203a126854",
   },
@@ -373,14 +404,14 @@ local hmac_test_vectors = {
   },
   {
     name = "RFC 4231 Test Case 3",
-    key = string.rep(string.char(0xaa), 20),
-    data = string.rep(string.char(0xdd), 50),
+    key = string_rep(string_char(0xaa), 20),
+    data = string_rep(string_char(0xdd), 50),
     expected = "fa73b0089d56a284efb0f0756c890be9b1b5dbdd8ee81a3655f83e33b2279d39bf3e848279a722c806b485a47e67c807b946a337bee8942674278859e13292fb",
   },
   {
     name = "RFC 4231 Test Case 4",
     key = bytes.from_hex("0102030405060708090a0b0c0d0e0f10111213141516171819"),
-    data = string.rep(string.char(0xcd), 50),
+    data = string_rep(string_char(0xcd), 50),
     expected = "b0ba465637458c6990e5a8c5f61d4af7e576d97ff94b872de76f8050361ee3dba91ca5c11aa25eb4d679275cc5788063a5f19741120c4f2de2adebeb10a298dd",
   },
 }
@@ -500,9 +531,9 @@ end
 --- including hash computation and HMAC for various message sizes.
 function sha512.benchmark()
   -- Test data
-  local message_64 = string.rep("a", 64)
-  local message_1k = string.rep("a", 1024)
-  local message_8k = string.rep("a", 8192)
+  local message_64 = string_rep("a", 64)
+  local message_1k = string_rep("a", 1024)
+  local message_8k = string_rep("a", 8192)
   local hmac_key = "benchmark_key"
 
   print("Hash Operations:")
