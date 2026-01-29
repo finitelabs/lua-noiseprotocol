@@ -9,16 +9,18 @@ local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
 
--- ============================================================================
--- CURVE25519 FIELD ARITHMETIC
--- ============================================================================
-
--- Local references for performance (avoid global table lookups in hot loops)
+-- Local references for performance
+local bit32_raw_band = bit32.raw_band
+local bit32_raw_rshift = bit32.raw_rshift
 local floor = math.floor
 local string_byte = string.byte
 local string_char = string.char
 local string_rep = string.rep
 local table_concat = table.concat
+
+-- ============================================================================
+-- CURVE25519 FIELD ARITHMETIC
+-- ============================================================================
 
 --- @alias FieldElement integer[] 16-element array (indices 1-16) representing a field element
 --- @alias ProductArray integer[] 31-element array (indices 1-31) for multiplication products
@@ -252,7 +254,7 @@ local function scalarmult(out, scalar, point)
     -- Optimized bit extraction
     local byte_idx = floor(i * 0.125) + 1 -- i / 8 + 1
     local bit_idx = i % 8
-    local bit = bit32.band(bit32.rshift(clam[byte_idx], bit_idx), 1)
+    local bit = bit32_raw_band(bit32_raw_rshift(clam[byte_idx], bit_idx), 1)
     swap(a, b, bit)
     swap(c, d, bit)
     add(e, a, c)

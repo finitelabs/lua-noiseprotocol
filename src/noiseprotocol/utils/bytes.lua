@@ -7,12 +7,24 @@ local bitn = require("bitn")
 local bit32 = bitn.bit32
 local bit64 = bitn.bit64
 
+-- Local references for performance
+local bit32_mask = bit32.mask
+local bit32_raw_bor = bit32.raw_bor
+local bit32_raw_bxor = bit32.raw_bxor
+local bit64_new = bit64.new
+local floor = math.floor
+local string_byte = string.byte
+local string_char = string.char
+local string_format = string.format
+local string_rep = string.rep
+local table_concat = table.concat
+
 --- Convert binary string to hexadecimal string
 --- @param str string Binary string
 --- @return string hex Hexadecimal representation
 function bytes.to_hex(str)
   return (str:gsub(".", function(c)
-    return string.format("%02x", string.byte(c))
+    return string_format("%02x", string_byte(c))
   end))
 end
 
@@ -21,7 +33,7 @@ end
 --- @return string str Binary string
 function bytes.from_hex(hex)
   return (hex:gsub("..", function(cc)
-    return string.char(tonumber(cc, 16))
+    return string_char(tonumber(cc, 16))
   end))
 end
 
@@ -29,16 +41,16 @@ end
 --- @param n integer 32-bit unsigned integer
 --- @return string bytes 4-byte string in little-endian order
 function bytes.u32_to_le_bytes(n)
-  n = bit32.mask(n)
-  return string.char(n % 256, math.floor(n / 256) % 256, math.floor(n / 65536) % 256, math.floor(n / 16777216) % 256)
+  n = bit32_mask(n)
+  return string_char(n % 256, floor(n / 256) % 256, floor(n / 65536) % 256, floor(n / 16777216) % 256)
 end
 
 --- Convert 32-bit unsigned integer to 4 bytes (big-endian)
 --- @param n integer 32-bit unsigned integer
 --- @return string bytes 4-byte string in big-endian order
 function bytes.u32_to_be_bytes(n)
-  n = bit32.mask(n)
-  return string.char(math.floor(n / 16777216) % 256, math.floor(n / 65536) % 256, math.floor(n / 256) % 256, n % 256)
+  n = bit32_mask(n)
+  return string_char(floor(n / 16777216) % 256, floor(n / 65536) % 256, floor(n / 256) % 256, n % 256)
 end
 
 --- Convert 64-bit value to 8 bytes (big-endian)
@@ -56,7 +68,7 @@ function bytes.u64_to_le_bytes(x)
   -- Handle simple integer case (< 2^53)
   if type(x) == "number" then
     local low = x % 0x100000000
-    local high = math.floor(x / 0x100000000)
+    local high = floor(x / 0x100000000)
     return bytes.u32_to_le_bytes(low) .. bytes.u32_to_le_bytes(high)
   else
     -- Handle {high, low} pair
@@ -72,7 +84,7 @@ end
 function bytes.le_bytes_to_u32(str, offset)
   offset = offset or 1
   assert(#str >= offset + 3, "Insufficient bytes for u32")
-  local b1, b2, b3, b4 = string.byte(str, offset, offset + 3)
+  local b1, b2, b3, b4 = string_byte(str, offset, offset + 3)
   return b1 + b2 * 256 + b3 * 65536 + b4 * 16777216
 end
 
@@ -83,7 +95,7 @@ end
 function bytes.be_bytes_to_u32(str, offset)
   offset = offset or 1
   assert(#str >= offset + 3, "Insufficient bytes for u32")
-  local b1, b2, b3, b4 = string.byte(str, offset, offset + 3)
+  local b1, b2, b3, b4 = string_byte(str, offset, offset + 3)
   return b1 * 16777216 + b2 * 65536 + b3 * 256 + b4
 end
 
@@ -118,10 +130,11 @@ end
 function bytes.xor_bytes(a, b)
   assert(#a == #b, "Strings must be same length for XOR")
   local result = {}
+  -- Using raw_bxor for performance; XOR on bytes (0-255) is always safe
   for i = 1, #a do
-    result[i] = string.char(bit32.bxor(string.byte(a, i), string.byte(b, i)))
+    result[i] = string_char(bit32_raw_bxor(string_byte(a, i), string_byte(b, i)))
   end
-  return table.concat(result)
+  return table_concat(result)
 end
 
 --- Constant-time comparison of two strings
@@ -134,7 +147,7 @@ function bytes.constant_time_compare(a, b)
   end
   local result = 0
   for i = 1, #a do
-    result = bit32.bor(result, bit32.bxor(string.byte(a, i), string.byte(b, i)))
+    result = bit32_raw_bor(result, bit32_raw_bxor(string_byte(a, i), string_byte(b, i)))
   end
   return result == 0
 end
@@ -148,7 +161,7 @@ function bytes.pad_to_16(data)
   if padding_len == 0 then
     return data
   end
-  return data .. string.rep("\0", padding_len)
+  return data .. string_rep("\0", padding_len)
 end
 
 --- Run comprehensive self-test with test vectors
@@ -181,7 +194,7 @@ function bytes.selftest()
     {
       name = "hex - single byte min",
       test = function()
-        local data = string.char(0x00)
+        local data = string_char(0x00)
         local hex = bytes.to_hex(data)
         return hex == "00"
       end,
@@ -189,7 +202,7 @@ function bytes.selftest()
     {
       name = "hex - single byte max",
       test = function()
-        local data = string.char(0xFF)
+        local data = string_char(0xFF)
         local hex = bytes.to_hex(data)
         return hex == "ff"
       end,
@@ -198,7 +211,7 @@ function bytes.selftest()
       name = "hex - all byte values",
       test = function()
         -- Test a few representative byte values
-        local data = string.char(0x00, 0x01, 0x7F, 0x80, 0xFE, 0xFF)
+        local data = string_char(0x00, 0x01, 0x7F, 0x80, 0xFE, 0xFF)
         local hex = bytes.to_hex(data)
         return hex == "00017f80feff"
       end,
@@ -214,7 +227,7 @@ function bytes.selftest()
     {
       name = "hex - binary data",
       test = function()
-        local data = string.char(0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0)
+        local data = string_char(0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0)
         local hex = bytes.to_hex(data)
         local back = bytes.from_hex(hex)
         return hex == "8090a0b0c0d0e0f0" and back == data
@@ -228,7 +241,7 @@ function bytes.selftest()
         local n = 0x12345678
         local bytes_str = bytes.u32_to_le_bytes(n)
         local back = bytes.le_bytes_to_u32(bytes_str)
-        local b1, b2, b3, b4 = string.byte(bytes_str, 1, 4)
+        local b1, b2, b3, b4 = string_byte(bytes_str, 1, 4)
         return back == n and b1 == 0x78 and b2 == 0x56 and b3 == 0x34 and b4 == 0x12
       end,
     },
@@ -238,7 +251,7 @@ function bytes.selftest()
         local n = 0
         local bytes_str = bytes.u32_to_le_bytes(n)
         local back = bytes.le_bytes_to_u32(bytes_str)
-        return back == 0 and bytes_str == string.char(0, 0, 0, 0)
+        return back == 0 and bytes_str == string_char(0, 0, 0, 0)
       end,
     },
     {
@@ -247,7 +260,7 @@ function bytes.selftest()
         local n = 0xFFFFFFFF
         local bytes_str = bytes.u32_to_le_bytes(n)
         local back = bytes.le_bytes_to_u32(bytes_str)
-        return back == 0xFFFFFFFF and bytes_str == string.char(0xFF, 0xFF, 0xFF, 0xFF)
+        return back == 0xFFFFFFFF and bytes_str == string_char(0xFF, 0xFF, 0xFF, 0xFF)
       end,
     },
     {
@@ -255,7 +268,7 @@ function bytes.selftest()
       test = function()
         local n = 0x100000000 -- Should be masked to 0
         local bytes_str = bytes.u32_to_le_bytes(n)
-        return bytes_str == string.char(0, 0, 0, 0)
+        return bytes_str == string_char(0, 0, 0, 0)
       end,
     },
     {
@@ -264,13 +277,13 @@ function bytes.selftest()
         local n = 0x80000000
         local bytes_str = bytes.u32_to_le_bytes(n)
         local back = bytes.le_bytes_to_u32(bytes_str)
-        return back == 0x80000000 and bytes_str == string.char(0, 0, 0, 0x80)
+        return back == 0x80000000 and bytes_str == string_char(0, 0, 0, 0x80)
       end,
     },
     {
       name = "u32 LE - with offset",
       test = function()
-        local data = "XXX" .. string.char(0x78, 0x56, 0x34, 0x12) .. "YYY"
+        local data = "XXX" .. string_char(0x78, 0x56, 0x34, 0x12) .. "YYY"
         local n = bytes.le_bytes_to_u32(data, 4)
         return n == 0x12345678
       end,
@@ -281,7 +294,7 @@ function bytes.selftest()
         local n = 0x12345678
         local bytes_str = bytes.u32_to_be_bytes(n)
         local back = bytes.be_bytes_to_u32(bytes_str)
-        local b1, b2, b3, b4 = string.byte(bytes_str, 1, 4)
+        local b1, b2, b3, b4 = string_byte(bytes_str, 1, 4)
         return back == n and b1 == 0x12 and b2 == 0x34 and b3 == 0x56 and b4 == 0x78
       end,
     },
@@ -291,7 +304,7 @@ function bytes.selftest()
         local n = 0
         local bytes_str = bytes.u32_to_be_bytes(n)
         local back = bytes.be_bytes_to_u32(bytes_str)
-        return back == 0 and bytes_str == string.char(0, 0, 0, 0)
+        return back == 0 and bytes_str == string_char(0, 0, 0, 0)
       end,
     },
     {
@@ -300,13 +313,13 @@ function bytes.selftest()
         local n = 0xFFFFFFFF
         local bytes_str = bytes.u32_to_be_bytes(n)
         local back = bytes.be_bytes_to_u32(bytes_str)
-        return back == 0xFFFFFFFF and bytes_str == string.char(0xFF, 0xFF, 0xFF, 0xFF)
+        return back == 0xFFFFFFFF and bytes_str == string_char(0xFF, 0xFF, 0xFF, 0xFF)
       end,
     },
     {
       name = "u32 BE - with offset",
       test = function()
-        local data = "XXX" .. string.char(0x12, 0x34, 0x56, 0x78) .. "YYY"
+        local data = "XXX" .. string_char(0x12, 0x34, 0x56, 0x78) .. "YYY"
         local n = bytes.be_bytes_to_u32(data, 4)
         return n == 0x12345678
       end,
@@ -316,10 +329,10 @@ function bytes.selftest()
     {
       name = "u64 LE - basic table",
       test = function()
-        local n = bit64.new(0x12345678, 0x9ABCDEF0)
+        local n = bit64_new(0x12345678, 0x9ABCDEF0)
         local bytes_str = bytes.u64_to_le_bytes(n)
         local back = bytes.le_bytes_to_u64(bytes_str)
-        local b1, b2, b3, b4, b5, b6, b7, b8 = string.byte(bytes_str, 1, 8)
+        local b1, b2, b3, b4, b5, b6, b7, b8 = string_byte(bytes_str, 1, 8)
         return back[1] == n[1]
           and back[2] == n[2]
           and b1 == 0xF0
@@ -340,32 +353,32 @@ function bytes.selftest()
         local back = bytes.le_bytes_to_u64(bytes_str)
         -- Check the conversion worked correctly
         local expected_low = n % 0x100000000
-        local expected_high = math.floor(n / 0x100000000)
+        local expected_high = floor(n / 0x100000000)
         return back[1] == expected_high and back[2] == expected_low
       end,
     },
     {
       name = "u64 LE - zero",
       test = function()
-        local n = bit64.new(0, 0)
+        local n = bit64_new(0, 0)
         local bytes_str = bytes.u64_to_le_bytes(n)
         local back = bytes.le_bytes_to_u64(bytes_str)
-        return back[1] == 0 and back[2] == 0 and bytes_str == string.rep(string.char(0), 8)
+        return back[1] == 0 and back[2] == 0 and bytes_str == string_rep(string_char(0), 8)
       end,
     },
     {
       name = "u64 LE - max value",
       test = function()
-        local n = bit64.new(0xFFFFFFFF, 0xFFFFFFFF)
+        local n = bit64_new(0xFFFFFFFF, 0xFFFFFFFF)
         local bytes_str = bytes.u64_to_le_bytes(n)
         local back = bytes.le_bytes_to_u64(bytes_str)
-        return back[1] == 0xFFFFFFFF and back[2] == 0xFFFFFFFF and bytes_str == string.rep(string.char(0xFF), 8)
+        return back[1] == 0xFFFFFFFF and back[2] == 0xFFFFFFFF and bytes_str == string_rep(string_char(0xFF), 8)
       end,
     },
     {
       name = "u64 LE - high word only",
       test = function()
-        local n = bit64.new(0x12345678, 0)
+        local n = bit64_new(0x12345678, 0)
         local bytes_str = bytes.u64_to_le_bytes(n)
         local back = bytes.le_bytes_to_u64(bytes_str)
         return back[1] == 0x12345678 and back[2] == 0
@@ -374,7 +387,7 @@ function bytes.selftest()
     {
       name = "u64 LE - low word only",
       test = function()
-        local n = bit64.new(0, 0x12345678)
+        local n = bit64_new(0, 0x12345678)
         local bytes_str = bytes.u64_to_le_bytes(n)
         local back = bytes.le_bytes_to_u64(bytes_str)
         return back[1] == 0 and back[2] == 0x12345678
@@ -383,7 +396,7 @@ function bytes.selftest()
     {
       name = "u64 LE - with offset",
       test = function()
-        local data = "XXX" .. bytes.u64_to_le_bytes(bit64.new(0x12345678, 0x9ABCDEF0)) .. "YYY"
+        local data = "XXX" .. bytes.u64_to_le_bytes(bit64_new(0x12345678, 0x9ABCDEF0)) .. "YYY"
         local n = bytes.le_bytes_to_u64(data, 4)
         return n[1] == 0x12345678 and n[2] == 0x9ABCDEF0
       end,
@@ -391,10 +404,10 @@ function bytes.selftest()
     {
       name = "u64 BE - basic",
       test = function()
-        local n = bit64.new(0x12345678, 0x9ABCDEF0)
+        local n = bit64_new(0x12345678, 0x9ABCDEF0)
         local bytes_str = bytes.u64_to_be_bytes(n)
         local back = bytes.be_bytes_to_u64(bytes_str)
-        local b1, b2, b3, b4, b5, b6, b7, b8 = string.byte(bytes_str, 1, 8)
+        local b1, b2, b3, b4, b5, b6, b7, b8 = string_byte(bytes_str, 1, 8)
         return back[1] == n[1]
           and back[2] == n[2]
           and b1 == 0x12
@@ -410,16 +423,16 @@ function bytes.selftest()
     {
       name = "u64 BE - zero",
       test = function()
-        local n = bit64.new(0, 0)
+        local n = bit64_new(0, 0)
         local bytes_str = bytes.u64_to_be_bytes(n)
         local back = bytes.be_bytes_to_u64(bytes_str)
-        return back[1] == 0 and back[2] == 0 and bytes_str == string.rep(string.char(0), 8)
+        return back[1] == 0 and back[2] == 0 and bytes_str == string_rep(string_char(0), 8)
       end,
     },
     {
       name = "u64 BE - with offset",
       test = function()
-        local data = "XXX" .. bytes.u64_to_be_bytes(bit64.new(0x12345678, 0x9ABCDEF0)) .. "YYY"
+        local data = "XXX" .. bytes.u64_to_be_bytes(bit64_new(0x12345678, 0x9ABCDEF0)) .. "YYY"
         local n = bytes.be_bytes_to_u64(data, 4)
         return n[1] == 0x12345678 and n[2] == 0x9ABCDEF0
       end,
@@ -429,10 +442,10 @@ function bytes.selftest()
     {
       name = "xor - basic",
       test = function()
-        local a = string.char(0x01, 0x02, 0x03, 0x04)
-        local b = string.char(0xFF, 0xFE, 0xFD, 0xFC)
+        local a = string_char(0x01, 0x02, 0x03, 0x04)
+        local b = string_char(0xFF, 0xFE, 0xFD, 0xFC)
         local result = bytes.xor_bytes(a, b)
-        local r1, r2, r3, r4 = string.byte(result, 1, 4)
+        local r1, r2, r3, r4 = string_byte(result, 1, 4)
         return r1 == 0xFE and r2 == 0xFC and r3 == 0xFE and r4 == 0xF8
       end,
     },
@@ -448,10 +461,10 @@ function bytes.selftest()
     {
       name = "xor - single byte",
       test = function()
-        local a = string.char(0x00)
-        local b = string.char(0xFF)
+        local a = string_char(0x00)
+        local b = string_char(0xFF)
         local result = bytes.xor_bytes(a, b)
-        return result == string.char(0xFF)
+        return result == string_char(0xFF)
       end,
     },
     {
@@ -459,23 +472,23 @@ function bytes.selftest()
       test = function()
         local a = "test"
         local result = bytes.xor_bytes(a, a)
-        return result == string.char(0, 0, 0, 0)
+        return result == string_char(0, 0, 0, 0)
       end,
     },
     {
       name = "xor - all zeros pattern",
       test = function()
-        local a = string.char(0xAA, 0xBB, 0xCC, 0xDD)
-        local b = string.char(0xAA, 0xBB, 0xCC, 0xDD)
+        local a = string_char(0xAA, 0xBB, 0xCC, 0xDD)
+        local b = string_char(0xAA, 0xBB, 0xCC, 0xDD)
         local result = bytes.xor_bytes(a, b)
-        return result == string.char(0, 0, 0, 0)
+        return result == string_char(0, 0, 0, 0)
       end,
     },
     {
       name = "xor - identity with zeros",
       test = function()
-        local a = string.char(0x12, 0x34, 0x56, 0x78)
-        local b = string.char(0, 0, 0, 0)
+        local a = string_char(0x12, 0x34, 0x56, 0x78)
+        local b = string_char(0, 0, 0, 0)
         local result = bytes.xor_bytes(a, b)
         return result == a
       end,
@@ -533,8 +546,8 @@ function bytes.selftest()
     {
       name = "constant_time_compare - binary with nulls",
       test = function()
-        local a = string.char(0x00, 0x01, 0xFF)
-        local b = string.char(0x00, 0x01, 0xFF)
+        local a = string_char(0x00, 0x01, 0xFF)
+        local b = string_char(0x00, 0x01, 0xFF)
         return bytes.constant_time_compare(a, b) == true
       end,
     },
@@ -543,7 +556,7 @@ function bytes.selftest()
     {
       name = "pad_to_16 - no padding needed",
       test = function()
-        local data = string.rep("a", 16)
+        local data = string_rep("a", 16)
         local padded = bytes.pad_to_16(data)
         return padded == data and #padded == 16
       end,
@@ -553,7 +566,7 @@ function bytes.selftest()
       test = function()
         local data = "Hello"
         local padded = bytes.pad_to_16(data)
-        return #padded == 16 and padded:sub(1, 5) == "Hello" and padded:sub(6) == string.rep("\0", 11)
+        return #padded == 16 and padded:sub(1, 5) == "Hello" and padded:sub(6) == string_rep("\0", 11)
       end,
     },
     {
@@ -567,7 +580,7 @@ function bytes.selftest()
     {
       name = "pad_to_16 - exactly 32 bytes",
       test = function()
-        local data = string.rep("a", 32)
+        local data = string_rep("a", 32)
         local padded = bytes.pad_to_16(data)
         return padded == data and #padded == 32
       end,
@@ -575,7 +588,7 @@ function bytes.selftest()
     {
       name = "pad_to_16 - one byte short",
       test = function()
-        local data = string.rep("a", 15)
+        local data = string_rep("a", 15)
         local padded = bytes.pad_to_16(data)
         return #padded == 16 and padded:sub(1, 15) == data and padded:sub(16) == "\0"
       end,
@@ -583,15 +596,15 @@ function bytes.selftest()
     {
       name = "pad_to_16 - one byte over",
       test = function()
-        local data = string.rep("a", 17)
+        local data = string_rep("a", 17)
         local padded = bytes.pad_to_16(data)
-        return #padded == 32 and padded:sub(1, 17) == data and padded:sub(18) == string.rep("\0", 15)
+        return #padded == 32 and padded:sub(1, 17) == data and padded:sub(18) == string_rep("\0", 15)
       end,
     },
     {
       name = "pad_to_16 - large data",
       test = function()
-        local data = string.rep("a", 1000)
+        local data = string_rep("a", 1000)
         local padded = bytes.pad_to_16(data)
         local expected_len = math.ceil(1000 / 16) * 16
         return #padded == expected_len and padded:sub(1, 1000) == data
@@ -660,7 +673,7 @@ function bytes.selftest()
     end
   end
 
-  print(string.format("\nByte operations result: %d/%d tests passed\n", passed, total))
+  print(string_format("\nByte operations result: %d/%d tests passed\n", passed, total))
   return passed == total
 end
 

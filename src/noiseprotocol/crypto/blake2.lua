@@ -12,13 +12,13 @@ local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
 
--- Local references for performance (avoid module table lookups in hot loops)
-local bit32_add = bit32.add
-local bit32_bxor = bit32.bxor
-local bit32_ror = bit32.ror
-local bit64_add = bit64.add
-local bit64_xor = bit64.xor
-local bit64_ror = bit64.ror
+-- Local references for performance
+local bit32_raw_add = bit32.raw_add
+local bit32_raw_bxor = bit32.raw_bxor
+local bit32_raw_ror = bit32.raw_ror
+local bit64_raw_add = bit64.raw_add
+local bit64_raw_bxor = bit64.raw_bxor
+local bit64_raw_ror = bit64.raw_ror
 local bit64_new = bit64.new
 local string_byte = string.byte
 local string_char = string.char
@@ -109,14 +109,14 @@ local blake2b_v = create_blake2b_vector()
 --- @param x integer Message word x
 --- @param y integer Message word y
 local function blake2s_g(v, a, b, c, d, x, y)
-  v[a] = bit32_add(bit32_add(v[a], v[b]), x)
-  v[d] = bit32_ror(bit32_bxor(v[d], v[a]), 16)
-  v[c] = bit32_add(v[c], v[d])
-  v[b] = bit32_ror(bit32_bxor(v[b], v[c]), 12)
-  v[a] = bit32_add(bit32_add(v[a], v[b]), y)
-  v[d] = bit32_ror(bit32_bxor(v[d], v[a]), 8)
-  v[c] = bit32_add(v[c], v[d])
-  v[b] = bit32_ror(bit32_bxor(v[b], v[c]), 7)
+  v[a] = bit32_raw_add(bit32_raw_add(v[a], v[b]), x)
+  v[d] = bit32_raw_ror(bit32_raw_bxor(v[d], v[a]), 16)
+  v[c] = bit32_raw_add(v[c], v[d])
+  v[b] = bit32_raw_ror(bit32_raw_bxor(v[b], v[c]), 12)
+  v[a] = bit32_raw_add(bit32_raw_add(v[a], v[b]), y)
+  v[d] = bit32_raw_ror(bit32_raw_bxor(v[d], v[a]), 8)
+  v[c] = bit32_raw_add(v[c], v[d])
+  v[b] = bit32_raw_ror(bit32_raw_bxor(v[b], v[c]), 7)
 end
 
 --- BLAKE2b G function
@@ -128,14 +128,14 @@ end
 --- @param x table Message word x
 --- @param y table Message word y
 local function blake2b_g(v, a, b, c, d, x, y)
-  v[a] = bit64_add(bit64_add(v[a], v[b]), x)
-  v[d] = bit64_ror(bit64_xor(v[d], v[a]), 32)
-  v[c] = bit64_add(v[c], v[d])
-  v[b] = bit64_ror(bit64_xor(v[b], v[c]), 24)
-  v[a] = bit64_add(bit64_add(v[a], v[b]), y)
-  v[d] = bit64_ror(bit64_xor(v[d], v[a]), 16)
-  v[c] = bit64_add(v[c], v[d])
-  v[b] = bit64_ror(bit64_xor(v[b], v[c]), 63)
+  v[a] = bit64_raw_add(bit64_raw_add(v[a], v[b]), x)
+  v[d] = bit64_raw_ror(bit64_raw_bxor(v[d], v[a]), 32)
+  v[c] = bit64_raw_add(v[c], v[d])
+  v[b] = bit64_raw_ror(bit64_raw_bxor(v[b], v[c]), 24)
+  v[a] = bit64_raw_add(bit64_raw_add(v[a], v[b]), y)
+  v[d] = bit64_raw_ror(bit64_raw_bxor(v[d], v[a]), 16)
+  v[c] = bit64_raw_add(v[c], v[d])
+  v[b] = bit64_raw_ror(bit64_raw_bxor(v[b], v[c]), 63)
 end
 
 --- BLAKE2s compression function
@@ -159,10 +159,10 @@ local function blake2s_compress(h, m, t, th, f)
   end
 
   -- Mix in counter and final flag
-  v[13] = bit32_bxor(v[13], t) -- Low 32 bits of counter
-  v[14] = bit32_bxor(v[14], th) -- High 32 bits of counter
+  v[13] = bit32_raw_bxor(v[13], t) -- Low 32 bits of counter
+  v[14] = bit32_raw_bxor(v[14], th) -- High 32 bits of counter
   if f then
-    v[15] = bit32_bxor(v[15], 0xFFFFFFFF) -- Invert all bits for final block
+    v[15] = bit32_raw_bxor(v[15], 0xFFFFFFFF) -- Invert all bits for final block
   end
 
   -- 10 rounds
@@ -185,7 +185,7 @@ local function blake2s_compress(h, m, t, th, f)
 
   -- Finalize
   for i = 1, 8 do
-    h[i] = bit32_bxor(bit32_bxor(h[i], v[i]), v[i + 8])
+    h[i] = bit32_raw_bxor(bit32_raw_bxor(h[i], v[i]), v[i + 8])
   end
 end
 
@@ -209,10 +209,10 @@ local function blake2b_compress(h, m, t, f)
   end
 
   -- Mix in counter and final flag
-  v[13] = bit64_xor(v[13], t)
-  v[14] = bit64_xor(v[14], bit64_new(0, 0)) -- High 64 bits of counter (always 0 for messages < 2^64 bytes)
+  v[13] = bit64_raw_bxor(v[13], t)
+  v[14] = bit64_raw_bxor(v[14], bit64_new(0, 0)) -- High 64 bits of counter (always 0 for messages < 2^64 bytes)
   if f then
-    v[15] = bit64_xor(v[15], bit64_new(0xffffffff, 0xffffffff))
+    v[15] = bit64_raw_bxor(v[15], bit64_new(0xffffffff, 0xffffffff))
   end
 
   -- 12 rounds
@@ -235,7 +235,7 @@ local function blake2b_compress(h, m, t, f)
 
   -- Finalize
   for i = 1, 8 do
-    h[i] = bit64_xor(bit64_xor(h[i], v[i]), v[i + 8])
+    h[i] = bit64_raw_bxor(bit64_raw_bxor(h[i], v[i]), v[i + 8])
   end
 end
 
@@ -260,7 +260,7 @@ function blake2.blake2s(data)
   -- Parameter block: digest length = 32, key length = 0, fanout = 1, depth = 1
   -- All other parameters are 0 (no salt, no personalization, etc.)
   local param = 32 + (0 * 256) + (1 * 65536) + (1 * 16777216) -- 0x01010020
-  h[1] = bit32_bxor(h[1], param)
+  h[1] = bit32_raw_bxor(h[1], param)
 
   local data_len = #data
   local offset = 1
@@ -347,7 +347,7 @@ function blake2.blake2b(data)
   -- In little-endian 64-bit: 0x0000000001010040
   -- Split into two 32-bit words (little-endian): low=0x01010040, high=0x00000000
   -- But our u64 format is {high, low}, so we need {0x00000000, 0x01010040}
-  h[1] = bit64_xor(h[1], bit64_new(0x00000000, 0x01010040))
+  h[1] = bit64_raw_bxor(h[1], bit64_new(0x00000000, 0x01010040))
 
   local data_len = #data
   local offset = 1
@@ -355,7 +355,7 @@ function blake2.blake2b(data)
 
   -- Process full 128-byte blocks
   while offset + 127 <= data_len do
-    counter = bit64_add(counter, bit64_new(0, 128))
+    counter = bit64_raw_add(counter, bit64_new(0, 128))
 
     -- Check if this is the last block
     local is_last_block = (offset + 128 > data_len)
@@ -374,7 +374,7 @@ function blake2.blake2b(data)
   -- Process final block (if there's remaining data)
   local remaining = data_len - offset + 1
   if remaining > 0 then
-    counter = bit64_add(counter, bit64_new(0, remaining))
+    counter = bit64_raw_add(counter, bit64_new(0, remaining))
 
     -- Pad final block with zeros
     local final_block = data:sub(offset) .. string_rep("\0", 128 - remaining)
@@ -451,8 +451,8 @@ function blake2.hmac_blake2s(key, data)
   local opad_bytes = {}
   for i = 1, block_size do
     local byte = string_byte(key, i)
-    ipad_bytes[i] = string_char(bit32_bxor(byte, 0x36))
-    opad_bytes[i] = string_char(bit32_bxor(byte, 0x5C))
+    ipad_bytes[i] = string_char(bit32_raw_bxor(byte, 0x36))
+    opad_bytes[i] = string_char(bit32_raw_bxor(byte, 0x5C))
   end
   local ipad = table_concat(ipad_bytes)
   local opad = table_concat(opad_bytes)
@@ -494,8 +494,8 @@ function blake2.hmac_blake2b(key, data)
   local opad_bytes = {}
   for i = 1, block_size do
     local byte = string_byte(key, i)
-    ipad_bytes[i] = string_char(bit32_bxor(byte, 0x36))
-    opad_bytes[i] = string_char(bit32_bxor(byte, 0x5C))
+    ipad_bytes[i] = string_char(bit32_raw_bxor(byte, 0x36))
+    opad_bytes[i] = string_char(bit32_raw_bxor(byte, 0x5C))
   end
   local ipad = table_concat(ipad_bytes)
   local opad = table_concat(opad_bytes)

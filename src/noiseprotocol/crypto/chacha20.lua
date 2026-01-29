@@ -10,10 +10,10 @@ local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
 
--- Local references for performance (avoid module table lookups in hot loops)
-local bit32_add = bit32.add
-local bit32_bxor = bit32.bxor
-local bit32_rol = bit32.rol
+-- Local references for performance
+local bit32_raw_add = bit32.raw_add
+local bit32_raw_bxor = bit32.raw_bxor
+local bit32_raw_rol = bit32.raw_rol
 local floor = math.floor
 local min = math.min
 local string_byte = string.byte
@@ -89,17 +89,17 @@ end
 --- @param c integer Index of third word
 --- @param d integer Index of fourth word
 local function quarter_round(state, a, b, c, d)
-  state[a] = bit32_add(state[a], state[b])
-  state[d] = bit32_rol(bit32_bxor(state[d], state[a]), 16)
+  state[a] = bit32_raw_add(state[a], state[b])
+  state[d] = bit32_raw_rol(bit32_raw_bxor(state[d], state[a]), 16)
 
-  state[c] = bit32_add(state[c], state[d])
-  state[b] = bit32_rol(bit32_bxor(state[b], state[c]), 12)
+  state[c] = bit32_raw_add(state[c], state[d])
+  state[b] = bit32_raw_rol(bit32_raw_bxor(state[b], state[c]), 12)
 
-  state[a] = bit32_add(state[a], state[b])
-  state[d] = bit32_rol(bit32_bxor(state[d], state[a]), 8)
+  state[a] = bit32_raw_add(state[a], state[b])
+  state[d] = bit32_raw_rol(bit32_raw_bxor(state[d], state[a]), 8)
 
-  state[c] = bit32_add(state[c], state[d])
-  state[b] = bit32_rol(bit32_bxor(state[b], state[c]), 7)
+  state[c] = bit32_raw_add(state[c], state[d])
+  state[b] = bit32_raw_rol(bit32_raw_bxor(state[b], state[c]), 7)
 end
 
 --- Generate one 64-byte block of ChaCha20 keystream
@@ -170,7 +170,7 @@ local function chacha20_block(key, nonce, counter)
 
   -- Add original state to working state
   for i = 1, 16 do
-    working_state[i] = bit32_add(working_state[i], state[i])
+    working_state[i] = bit32_raw_add(working_state[i], state[i])
   end
 
   -- Convert state to byte string (little-endian) - optimized with local references
@@ -206,7 +206,7 @@ function chacha20.crypt(key, nonce, plaintext, counter)
     for i = 1, block_size do
       local plaintext_byte = string_byte(plaintext, offset + i - 1)
       local keystream_byte = string_byte(keystream, i)
-      result_bytes[result_idx] = string_char(bit32_bxor(plaintext_byte, keystream_byte))
+      result_bytes[result_idx] = string_char(bit32_raw_bxor(plaintext_byte, keystream_byte))
       result_idx = result_idx + 1
     end
 

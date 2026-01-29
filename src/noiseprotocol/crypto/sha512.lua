@@ -12,15 +12,15 @@ local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
 
--- Local references for performance (avoid module table lookups in hot loops)
-local bit64_add = bit64.add
-local bit64_xor = bit64.xor
-local bit64_band = bit64.band
-local bit64_bnot = bit64.bnot
-local bit64_ror = bit64.ror
-local bit64_shr = bit64.shr
+-- Local references for performance
+local bit64_raw_add = bit64.raw_add
+local bit64_raw_bxor = bit64.raw_bxor
+local bit64_raw_band = bit64.raw_band
+local bit64_raw_bnot = bit64.raw_bnot
+local bit64_raw_ror = bit64.raw_ror
+local bit64_raw_rshift = bit64.raw_rshift
 local bit64_new = bit64.new
-local bit32_bxor = bit32.bxor
+local bit32_raw_bxor = bit32.raw_bxor
 local string_char = string.char
 local string_rep = string.rep
 local string_byte = string.byte
@@ -147,28 +147,28 @@ local chunk_W = create_message_schedule_64()
 --- @param x Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function Sigma0(x)
-  return bit64_xor(bit64_xor(bit64_ror(x, 28), bit64_ror(x, 34)), bit64_ror(x, 39))
+  return bit64_raw_bxor(bit64_raw_bxor(bit64_raw_ror(x, 28), bit64_raw_ror(x, 34)), bit64_raw_ror(x, 39))
 end
 
 --- SHA-512 Sigma1 function
 --- @param x Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function Sigma1(x)
-  return bit64_xor(bit64_xor(bit64_ror(x, 14), bit64_ror(x, 18)), bit64_ror(x, 41))
+  return bit64_raw_bxor(bit64_raw_bxor(bit64_raw_ror(x, 14), bit64_raw_ror(x, 18)), bit64_raw_ror(x, 41))
 end
 
 --- SHA-512 sigma0 function
 --- @param x Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function sigma0(x)
-  return bit64_xor(bit64_xor(bit64_ror(x, 1), bit64_ror(x, 8)), bit64_shr(x, 7))
+  return bit64_raw_bxor(bit64_raw_bxor(bit64_raw_ror(x, 1), bit64_raw_ror(x, 8)), bit64_raw_rshift(x, 7))
 end
 
 --- SHA-512 sigma1 function
 --- @param x Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function sigma1(x)
-  return bit64_xor(bit64_xor(bit64_ror(x, 19), bit64_ror(x, 61)), bit64_shr(x, 6))
+  return bit64_raw_bxor(bit64_raw_bxor(bit64_raw_ror(x, 19), bit64_raw_ror(x, 61)), bit64_raw_rshift(x, 6))
 end
 
 --- SHA-512 Ch function
@@ -177,7 +177,7 @@ end
 --- @param z Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function Ch(x, y, z)
-  return bit64_xor(bit64_band(x, y), bit64_band(bit64_bnot(x), z))
+  return bit64_raw_bxor(bit64_raw_band(x, y), bit64_raw_band(bit64_raw_bnot(x), z))
 end
 
 --- SHA-512 Maj function
@@ -186,7 +186,7 @@ end
 --- @param z Int64HighLow {high, low} input
 --- @return Int64HighLow {high, low} result
 local function Maj(x, y, z)
-  return bit64_xor(bit64_xor(bit64_band(x, y), bit64_band(x, z)), bit64_band(y, z))
+  return bit64_raw_bxor(bit64_raw_bxor(bit64_raw_band(x, y), bit64_raw_band(x, z)), bit64_raw_band(y, z))
 end
 
 --- SHA-512 core compression function
@@ -208,7 +208,7 @@ local function sha512_chunk(chunk, H)
     local w2 = W[i - 2]
     local s0 = sigma0(w15)
     local s1 = sigma1(w2)
-    local result = bit64_add(bit64_add(bit64_add(W[i - 16], s0), W[i - 7]), s1)
+    local result = bit64_raw_add(bit64_raw_add(bit64_raw_add(W[i - 16], s0), W[i - 7]), s1)
     W[i][1], W[i][2] = result[1], result[2]
   end
 
@@ -220,30 +220,30 @@ local function sha512_chunk(chunk, H)
     local prime = K[i]
     local S1 = Sigma1(e)
     local ch = Ch(e, f, g)
-    local temp1 = bit64_add(bit64_add(bit64_add(bit64_add(h, S1), ch), prime), W[i])
+    local temp1 = bit64_raw_add(bit64_raw_add(bit64_raw_add(bit64_raw_add(h, S1), ch), prime), W[i])
     local S0 = Sigma0(a)
     local maj = Maj(a, b, c)
-    local temp2 = bit64_add(S0, maj)
+    local temp2 = bit64_raw_add(S0, maj)
 
     h = g
     g = f
     f = e
-    e = bit64_add(d, temp1)
+    e = bit64_raw_add(d, temp1)
     d = c
     c = b
     b = a
-    a = bit64_add(temp1, temp2)
+    a = bit64_raw_add(temp1, temp2)
   end
 
   -- Add compressed chunk to current hash value
-  H[1] = bit64_add(H[1], a)
-  H[2] = bit64_add(H[2], b)
-  H[3] = bit64_add(H[3], c)
-  H[4] = bit64_add(H[4], d)
-  H[5] = bit64_add(H[5], e)
-  H[6] = bit64_add(H[6], f)
-  H[7] = bit64_add(H[7], g)
-  H[8] = bit64_add(H[8], h)
+  H[1] = bit64_raw_add(H[1], a)
+  H[2] = bit64_raw_add(H[2], b)
+  H[3] = bit64_raw_add(H[3], c)
+  H[4] = bit64_raw_add(H[4], d)
+  H[5] = bit64_raw_add(H[5], e)
+  H[6] = bit64_raw_add(H[6], f)
+  H[7] = bit64_raw_add(H[7], g)
+  H[8] = bit64_raw_add(H[8], h)
 end
 
 --- Compute SHA-512 hash of input data
@@ -338,8 +338,8 @@ function sha512.hmac_sha512(key, data)
   local opad_bytes = {}
   for i = 1, block_size do
     local byte = string_byte(key, i)
-    ipad_bytes[i] = string_char(bit32_bxor(byte, 0x36))
-    opad_bytes[i] = string_char(bit32_bxor(byte, 0x5C))
+    ipad_bytes[i] = string_char(bit32_raw_bxor(byte, 0x36))
+    opad_bytes[i] = string_char(bit32_raw_bxor(byte, 0x5C))
   end
   local ipad = table_concat(ipad_bytes)
   local opad = table_concat(opad_bytes)
