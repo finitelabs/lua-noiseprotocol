@@ -10,7 +10,7 @@ local benchmark_op = utils.benchmark.benchmark_op
 local chacha20 = require("noiseprotocol.crypto.chacha20")
 local poly1305 = require("noiseprotocol.crypto.poly1305")
 
--- Local references for performance (avoid module table lookups in hot loops)
+-- Local references for performance
 local string_char = string.char
 local string_rep = string.rep
 local string_sub = string.sub

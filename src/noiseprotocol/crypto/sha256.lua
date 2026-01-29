@@ -10,13 +10,13 @@ local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
 
--- Local references for performance (avoid global/module table lookups in hot loops)
-local bit32_bxor = bit32.bxor
-local bit32_band = bit32.band
-local bit32_bnot = bit32.bnot
-local bit32_ror = bit32.ror
-local bit32_rshift = bit32.rshift
-local bit32_add = bit32.add
+-- Local references for performance
+local bit32_raw_bxor = bit32.raw_bxor
+local bit32_raw_band = bit32.raw_band
+local bit32_raw_bnot = bit32.raw_bnot
+local bit32_raw_ror = bit32.raw_ror
+local bit32_raw_rshift = bit32.raw_rshift
+local bit32_raw_add = bit32.raw_add
 local bytes_be_bytes_to_u32 = bytes.be_bytes_to_u32
 local bytes_u32_to_be_bytes = bytes.u32_to_be_bytes
 local string_char = string.char
@@ -137,9 +137,9 @@ local function sha256_chunk(chunk, H)
   for i = 17, 64 do
     local w15 = W[i - 15]
     local w2 = W[i - 2]
-    local s0 = bit32_bxor(bit32_ror(w15, 7), bit32_bxor(bit32_ror(w15, 18), bit32_rshift(w15, 3)))
-    local s1 = bit32_bxor(bit32_ror(w2, 17), bit32_bxor(bit32_ror(w2, 19), bit32_rshift(w2, 10)))
-    W[i] = bit32_add(bit32_add(bit32_add(W[i - 16], s0), W[i - 7]), s1)
+    local s0 = bit32_raw_bxor(bit32_raw_ror(w15, 7), bit32_raw_bxor(bit32_raw_ror(w15, 18), bit32_raw_rshift(w15, 3)))
+    local s1 = bit32_raw_bxor(bit32_raw_ror(w2, 17), bit32_raw_bxor(bit32_raw_ror(w2, 19), bit32_raw_rshift(w2, 10)))
+    W[i] = bit32_raw_add(bit32_raw_add(bit32_raw_add(W[i - 16], s0), W[i - 7]), s1)
   end
 
   -- Initialize working variables
@@ -148,32 +148,32 @@ local function sha256_chunk(chunk, H)
   -- Main loop (optimized with local references)
   for i = 1, 64 do
     local ki = K[i]
-    local S1 = bit32_bxor(bit32_ror(e, 6), bit32_bxor(bit32_ror(e, 11), bit32_ror(e, 25)))
-    local ch = bit32_bxor(bit32_band(e, f), bit32_band(bit32_bnot(e), g))
-    local temp1 = bit32_add(bit32_add(bit32_add(bit32_add(h, S1), ch), ki), W[i])
-    local S0 = bit32_bxor(bit32_ror(a, 2), bit32_bxor(bit32_ror(a, 13), bit32_ror(a, 22)))
-    local maj = bit32_bxor(bit32_band(a, b), bit32_bxor(bit32_band(a, c), bit32_band(b, c)))
-    local temp2 = bit32_add(S0, maj)
+    local S1 = bit32_raw_bxor(bit32_raw_ror(e, 6), bit32_raw_bxor(bit32_raw_ror(e, 11), bit32_raw_ror(e, 25)))
+    local ch = bit32_raw_bxor(bit32_raw_band(e, f), bit32_raw_band(bit32_raw_bnot(e), g))
+    local temp1 = bit32_raw_add(bit32_raw_add(bit32_raw_add(bit32_raw_add(h, S1), ch), ki), W[i])
+    local S0 = bit32_raw_bxor(bit32_raw_ror(a, 2), bit32_raw_bxor(bit32_raw_ror(a, 13), bit32_raw_ror(a, 22)))
+    local maj = bit32_raw_bxor(bit32_raw_band(a, b), bit32_raw_bxor(bit32_raw_band(a, c), bit32_raw_band(b, c)))
+    local temp2 = bit32_raw_add(S0, maj)
 
     h = g
     g = f
     f = e
-    e = bit32_add(d, temp1)
+    e = bit32_raw_add(d, temp1)
     d = c
     c = b
     b = a
-    a = bit32_add(temp1, temp2)
+    a = bit32_raw_add(temp1, temp2)
   end
 
   -- Add compressed chunk to current hash value
-  H[1] = bit32_add(H[1], a)
-  H[2] = bit32_add(H[2], b)
-  H[3] = bit32_add(H[3], c)
-  H[4] = bit32_add(H[4], d)
-  H[5] = bit32_add(H[5], e)
-  H[6] = bit32_add(H[6], f)
-  H[7] = bit32_add(H[7], g)
-  H[8] = bit32_add(H[8], h)
+  H[1] = bit32_raw_add(H[1], a)
+  H[2] = bit32_raw_add(H[2], b)
+  H[3] = bit32_raw_add(H[3], c)
+  H[4] = bit32_raw_add(H[4], d)
+  H[5] = bit32_raw_add(H[5], e)
+  H[6] = bit32_raw_add(H[6], f)
+  H[7] = bit32_raw_add(H[7], g)
+  H[8] = bit32_raw_add(H[8], h)
 end
 
 -- ============================================================================
@@ -267,8 +267,8 @@ function sha256.hmac_sha256(key, data)
   local opad_bytes = {}
   for i = 1, block_size do
     local byte = string_byte(key, i)
-    ipad_bytes[i] = string_char(bit32_bxor(byte, 0x36))
-    opad_bytes[i] = string_char(bit32_bxor(byte, 0x5C))
+    ipad_bytes[i] = string_char(bit32_raw_bxor(byte, 0x36))
+    opad_bytes[i] = string_char(bit32_raw_bxor(byte, 0x5C))
   end
   local ipad = table_concat(ipad_bytes)
   local opad = table_concat(opad_bytes)

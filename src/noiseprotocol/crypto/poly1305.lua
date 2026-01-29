@@ -9,9 +9,9 @@ local utils = require("noiseprotocol.utils")
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
 
--- Local references for performance (avoid module table lookups in hot loops)
-local bit32_band = bit32.band
-local bit32_lshift = bit32.lshift
+-- Local references for performance
+local bit32_raw_band = bit32.raw_band
+local bit32_raw_lshift = bit32.raw_lshift
 local floor = math.floor
 local string_byte = string.byte
 local string_char = string.char
@@ -49,7 +49,7 @@ local function reduce_high_order_terms(prod, start_pos, end_pos)
       local bit_offset = excess_bits % 8
 
       if bit_offset > 0 then
-        reduction_multiplier = bit32_lshift(reduction_multiplier, bit_offset)
+        reduction_multiplier = bit32_raw_lshift(reduction_multiplier, bit_offset)
       end
 
       -- Add reduced value to target position
@@ -181,13 +181,13 @@ function poly1305.authenticate(key, msg)
 
   -- Apply RFC 7539 clamping to ensure r has specific bit patterns
   -- This prevents certain classes of attacks and ensures key validity
-  r[4] = bit32_band(r[4], 15) -- Clear top 4 bits of 4th byte
-  r[5] = bit32_band(r[5], 252) -- Clear bottom 2 bits of 5th byte
-  r[8] = bit32_band(r[8], 15) -- Clear top 4 bits of 8th byte
-  r[9] = bit32_band(r[9], 252) -- Clear bottom 2 bits of 9th byte
-  r[12] = bit32_band(r[12], 15) -- Clear top 4 bits of 12th byte
-  r[13] = bit32_band(r[13], 252) -- Clear bottom 2 bits of 13th byte
-  r[16] = bit32_band(r[16], 15) -- Clear top 4 bits of 16th byte
+  r[4] = bit32_raw_band(r[4], 15) -- Clear top 4 bits of 4th byte
+  r[5] = bit32_raw_band(r[5], 252) -- Clear bottom 2 bits of 5th byte
+  r[8] = bit32_raw_band(r[8], 15) -- Clear top 4 bits of 8th byte
+  r[9] = bit32_raw_band(r[9], 252) -- Clear bottom 2 bits of 9th byte
+  r[12] = bit32_raw_band(r[12], 15) -- Clear top 4 bits of 12th byte
+  r[13] = bit32_raw_band(r[13], 252) -- Clear bottom 2 bits of 13th byte
+  r[16] = bit32_raw_band(r[16], 15) -- Clear top 4 bits of 16th byte
 
   -- Extract s (second 16 bytes) - used for final addition
   local s = create_key_array(key_bytes, 17)

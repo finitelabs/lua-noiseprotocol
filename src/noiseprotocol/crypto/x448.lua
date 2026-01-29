@@ -13,17 +13,19 @@
 local x448 = {}
 
 local bitn = require("bitn")
-local band = bitn.bit32.band
-local bor = bitn.bit32.bor
-local bxor = bitn.bit32.bxor
-local rshift = bitn.bit32.rshift
-
 local utils = require("noiseprotocol.utils")
+
 local bytes = utils.bytes
 local benchmark_op = utils.benchmark.benchmark_op
-local floor = math.floor
-local char = string.char
+
+-- Local references for performance
+local bit32_raw_band = bitn.bit32.raw_band
+local bit32_raw_bor = bitn.bit32.raw_bor
+local bit32_raw_bxor = bitn.bit32.raw_bxor
+local bit32_raw_rshift = bitn.bit32.raw_rshift
 local byte = string.byte
+local char = string.char
+local floor = math.floor
 local string_rep = string.rep
 local table_concat = table.concat
 
@@ -70,7 +72,7 @@ local function fe_reduce(a)
   local carry = 0
   for i = 1, NUM_LIMBS do
     carry = carry + (a[i] or 0)
-    a[i] = band(carry, LIMB_MASK)
+    a[i] = bit32_raw_band(carry, LIMB_MASK)
     carry = floor(carry / 256)
   end
 
@@ -83,7 +85,7 @@ local function fe_reduce(a)
     local new_carry = 0
     for i = 1, NUM_LIMBS do
       new_carry = new_carry + a[i]
-      a[i] = band(new_carry, LIMB_MASK)
+      a[i] = bit32_raw_band(new_carry, LIMB_MASK)
       new_carry = floor(new_carry / 256)
     end
     carry = new_carry
@@ -128,17 +130,17 @@ local function fe_sub(a, b)
     local carry = 0
     for i = 1, 28 do
       local sum = r[i] + 0xFF + carry
-      r[i] = band(sum, LIMB_MASK)
+      r[i] = bit32_raw_band(sum, LIMB_MASK)
       carry = floor(sum / 256)
     end
 
     local sum = r[29] + 0xFE + carry
-    r[29] = band(sum, LIMB_MASK)
+    r[29] = bit32_raw_band(sum, LIMB_MASK)
     carry = floor(sum / 256)
 
     for i = 30, NUM_LIMBS do
       sum = r[i] + 0xFF + carry
-      r[i] = band(sum, LIMB_MASK)
+      r[i] = bit32_raw_band(sum, LIMB_MASK)
       carry = floor(sum / 256)
     end
   end
@@ -177,7 +179,7 @@ local function fe_mul(a, b)
   local carry = 0
   for i = 1, 2 * NUM_LIMBS do
     local sum = r[i] + carry
-    r[i] = band(sum, LIMB_MASK)
+    r[i] = bit32_raw_band(sum, LIMB_MASK)
     carry = floor(sum / 256)
   end
 
@@ -213,7 +215,7 @@ local function fe_mul(a, b)
   carry = 0
   for i = 1, NUM_LIMBS do
     local sum = r[i] + carry
-    r[i] = band(sum, LIMB_MASK)
+    r[i] = bit32_raw_band(sum, LIMB_MASK)
     carry = floor(sum / 256)
   end
 
@@ -225,7 +227,7 @@ local function fe_mul(a, b)
     carry = 0
     for i = 1, NUM_LIMBS do
       local sum = r[i] + carry
-      r[i] = band(sum, LIMB_MASK)
+      r[i] = bit32_raw_band(sum, LIMB_MASK)
       carry = floor(sum / 256)
     end
   end
@@ -356,7 +358,7 @@ local function fe_tobytes(a)
   -- Convert to bytes - with 8-bit limbs it's direct
   local b = {}
   for i = 1, NUM_LIMBS do
-    b[i] = char(band(t[i] or 0, 0xFF))
+    b[i] = char(bit32_raw_band(t[i] or 0, 0xFF))
   end
 
   return table_concat(b)
@@ -375,8 +377,8 @@ local function x448_scalarmult(scalar, base)
   for i = 1, 56 do
     k[i] = byte(scalar, i) or 0
   end
-  k[1] = band(k[1], 252) -- Clear low 2 bits
-  k[56] = bor(k[56], 128) -- Set high bit
+  k[1] = bit32_raw_band(k[1], 252) -- Clear low 2 bits
+  k[56] = bit32_raw_bor(k[56], 128) -- Set high bit
 
   -- Initialize Montgomery ladder
   local x_1 = fe_copy(u)
@@ -388,12 +390,12 @@ local function x448_scalarmult(scalar, base)
 
   -- Montgomery ladder
   for t = 447, 0, -1 do
-    local byte_idx = rshift(t, 3) + 1 -- t // 8 + 1
-    local bit_idx = band(t, 7) -- t % 8
-    local kt = band(rshift(k[byte_idx], bit_idx), 1)
+    local byte_idx = bit32_raw_rshift(t, 3) + 1 -- t // 8 + 1
+    local bit_idx = bit32_raw_band(t, 7) -- t % 8
+    local kt = bit32_raw_band(bit32_raw_rshift(k[byte_idx], bit_idx), 1)
 
     -- Conditional swap
-    swap = bxor(swap, kt)
+    swap = bit32_raw_bxor(swap, kt)
     x_2, x_3 = cswap(swap, x_2, x_3)
     z_2, z_3 = cswap(swap, z_2, z_3)
     swap = kt
@@ -415,8 +417,8 @@ local function x448_scalarmult(scalar, base)
 
     -- z_2 = e * (aa + a24 * e)
     local a24_limbs = fe_zero()
-    a24_limbs[1] = band(A24, 0xFF)
-    a24_limbs[2] = band(rshift(A24, 8), 0xFF)
+    a24_limbs[1] = bit32_raw_band(A24, 0xFF)
+    a24_limbs[2] = bit32_raw_band(bit32_raw_rshift(A24, 8), 0xFF)
 
     local a24_e = fe_mul(a24_limbs, e)
     z_2 = fe_mul(e, fe_add(aa, a24_e))
