@@ -181,7 +181,7 @@ function CipherSuite:new(dh, cipher, hash)
 end
 
 -- Protocol constants
-local MAX_NONCE = 2^32 - 1
+local MAX_NONCE = 2 ^ 32 - 1
 
 --- X25519 Diffie-Hellman implementation
 --- @type DHFunction
