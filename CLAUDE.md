@@ -8,10 +8,10 @@ This is a pure Lua implementation of the Noise Protocol Framework with zero exte
 
 **Key Characteristics:**
 - Pure Lua implementation (5.1+ and LuaJIT compatible)
-- Zero dependencies for maximum portability
+- Zero dependencies for maximum portability (the full single-file bundle vendors everything)
 - Complete Noise Protocol Framework implementation
-- Optional OpenSSL acceleration via `noiseprotocol.openssl_wrapper`
-- Performance-focused crypto implementations
+- Cryptographic primitives provided by [lua-crypto](https://github.com/finitelabs/lua-crypto) (vendored as `vendor/crypto.lua`)
+- Optional OpenSSL acceleration via `crypto.use_openssl(true)` (from lua-crypto)
 - Extensive test coverage with RFC test vectors
 
 ## Development Commands
@@ -27,8 +27,8 @@ LUA_BINARY=lua5.1 ./run_tests.sh
 LUA_BINARY=luajit ./run_tests.sh
 
 # Run specific test suites
-./run_tests.sh chacha20 poly1305 x25519
-make test-x25519
+./run_tests.sh utils_bytes noise
+make test-noise
 
 # Run test matrix across all Lua versions
 ./run_tests_matrix.sh
@@ -38,20 +38,6 @@ make test-matrix
 ./run_tests.sh noise_vectors
 NOISE_VECTORS_DIR=vectors_full ./run_tests.sh noise_vectors  # Full test set
 NOISE_VECTOR_WORKERS=8 ./run_tests.sh noise_vectors          # Parallel execution
-```
-
-### Benchmarking
-```bash
-# Run all benchmarks (uses LuaJIT by default for performance)
-./run_benchmarks.sh
-make bench
-
-# Run specific benchmarks
-./run_benchmarks.sh x25519 chacha20_poly1305
-make bench-x448
-
-# Use different Lua interpreter
-LUA_BINARY=lua5.1 ./run_benchmarks.sh
 ```
 
 ### Code Quality
@@ -71,7 +57,7 @@ make check
 
 ### Building
 ```bash
-# Build single-file distribution
+# Build single-file distributions (noiseprotocol.lua [core] + noiseprotocol-portable.lua)
 make build
 
 # Install development dependencies
@@ -86,34 +72,39 @@ make clean
 ### Module Structure
 ```
 src/noiseprotocol/
-├── init.lua                    # Main module with complete Noise implementation
-├── crypto/                     # Cryptographic primitives
-│   ├── init.lua               # Crypto module aggregator
-│   ├── x25519.lua / x448.lua  # Diffie-Hellman functions
-│   ├── chacha20.lua           # Stream cipher
-│   ├── chacha20_poly1305.lua  # ChaCha20-Poly1305 AEAD
-│   ├── aes_gcm.lua            # AES-GCM AEAD
-│   ├── poly1305.lua           # Poly1305 MAC
-│   ├── sha256.lua / sha512.lua / blake2.lua  # Hash functions
-├── utils/                      # Utility modules
-│   ├── bytes.lua              # Byte manipulation utilities
-│   └── benchmark.lua          # Performance measurement tools
-└── openssl_wrapper.lua        # Optional OpenSSL acceleration
+├── init.lua                    # Main module with the complete Noise implementation
+└── utils/                      # Utility modules
+    ├── bytes.lua              # Byte manipulation utilities (uses bitn)
+    └── benchmark.lua          # Performance measurement helper
 vendor/
-└── bitn.lua                    # Unified bitwise operations for all Lua versions
+├── bitn.lua                    # Portable bitwise operations (lua-bitn)
+└── crypto.lua                  # Cryptographic primitives (lua-crypto, canonical core build: bitn excluded)
 ```
+
+The cryptographic primitives (hashes, AEAD ciphers, MACs, X25519/X448) live in
+[lua-crypto](https://github.com/finitelabs/lua-crypto). The `vendor/crypto.lua`
+here is lua-crypto's canonical `crypto.lua` (core) build (bitn excluded, since
+this repo already vendors `bitn.lua`). To update it, drop in a newer lua-crypto
+release artifact.
+
+### Build variants
+- `noiseprotocol.lua` — canonical **core** build: excludes `bitn` and `crypto`
+  (`amalg -i bitn -i crypto`), expects them on the Lua path. Composes with
+  libraries that share those dependencies without duplicating them.
+- `noiseprotocol-portable.lua` — **portable**: bundles the Noise implementation
+  plus `crypto` and `bitn` for zero-dependency drop-in use.
 
 ### Key Classes and APIs
 
-**NoiseConnection** (`src/noiseprotocol/init.lua:1563`)
+**NoiseConnection** (`src/noiseprotocol/init.lua`)
 - Main API for establishing secure connections
 - Handles handshake patterns (XX, IK, NK, etc.) and PSK variants
 - Manages transport phase encryption/decryption
 
-**Cryptographic Primitives** (`src/noiseprotocol/crypto/`)
-- All modules provide `selftest()` and `benchmark()` functions
-- Pure Lua implementations with consistent APIs
-- Support for OpenSSL acceleration where available
+**Cryptographic Primitives** (vendored from lua-crypto as `vendor/crypto.lua`)
+- Exposed to Noise code via `require("crypto")` and re-exported as `noiseprotocol.crypto`
+- Tested in lua-crypto's own CI; exercised here end-to-end by the `noise` /
+  `noise_vectors` suites
 
 **HandshakeState, SymmetricState, CipherState** (`src/noiseprotocol/init.lua`)
 - Core protocol state machines following Noise specification
@@ -143,9 +134,8 @@ Supports all standard patterns from the Noise specification:
 
 ### Performance
 - LuaJIT significantly outperforms standard Lua interpreters
-- Benchmarks should be run with LuaJIT for realistic performance data
 - X448 is notably slower than X25519 in pure Lua
-- Crypto modules use pre-allocated arrays for performance; not thread-safe for concurrent coroutines
+- The vendored crypto uses pre-allocated arrays for performance; not thread-safe for concurrent coroutines
 
 ### Compatibility
 - Supports Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT
@@ -162,5 +152,4 @@ Supports all standard patterns from the Noise specification:
 ### Code Style
 - Use `make format` before committing changes
 - Follow existing naming conventions and module patterns
-- All crypto modules must implement `selftest()` and `benchmark()`
 - Add tests for new functionality following existing patterns

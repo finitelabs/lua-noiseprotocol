@@ -140,6 +140,13 @@ jobs:
             echo "❌ build/noiseprotocol.lua missing"
             exit 1
           fi
+          # Check portable build (all dependencies bundled)
+          if [ -f "build/noiseprotocol-portable.lua" ]; then
+            echo "✅ build/noiseprotocol-portable.lua exists ($(wc -c < "build/noiseprotocol-portable.lua") bytes)"
+          else
+            echo "❌ build/noiseprotocol-portable.lua missing"
+            exit 1
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
