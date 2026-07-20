@@ -22,10 +22,16 @@ runs on Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT.
 Download a pre-built single-file module from the
 [Releases](https://github.com/finitelabs/lua-noiseprotocol/releases) page:
 
-- **`noiseprotocol.lua`** - Complete bundle with all dependencies included (zero
-  external dependencies)
-- **`noiseprotocol-core.lua`** - Core library only, requires `bitn` to be
-  installed separately
+- **`noiseprotocol.lua`** - the canonical **core** build. Requires `bitn` and
+  `crypto` ([lua-crypto](https://github.com/finitelabs/lua-crypto)) on the Lua
+  path. Use this when composing with libraries that already provide them.
+- **`noiseprotocol-portable.lua`** - **portable** build with every dependency
+  bundled in (zero external dependencies). Use this for a single drop-in file.
+
+The cryptographic primitives are provided by
+[lua-crypto](https://github.com/finitelabs/lua-crypto) (vendored as
+`vendor/crypto.lua`); this library implements the Noise Protocol Framework on
+top of them.
 
 ### Option 2: From Source
 
@@ -140,16 +146,6 @@ make test-matrix-x25519  # Run specific module across all Lua versions
 LUA_BINARY=lua5.1 ./run_tests.sh
 ```
 
-### Benchmarking
-
-```bash
-make bench               # Run all benchmarks
-make bench-x25519        # Run specific module benchmark
-
-# Or use scripts directly with custom Lua binary
-LUA_BINARY=luajit ./run_benchmarks.sh
-```
-
 ### Code Quality
 
 ```bash
@@ -162,7 +158,7 @@ make lint                # Run luacheck
 ### Building
 
 ```bash
-make build               # Build single-file distributions (build/noiseprotocol.lua, build/noiseprotocol-core.lua)
+make build               # Build single-file distributions (build/noiseprotocol.lua [core], build/noiseprotocol-portable.lua)
 make clean               # Remove generated files
 ```
 

@@ -51,8 +51,8 @@ vectors_dir="${NOISE_VECTORS_DIR:=vectors_sampled}"
 vector_files=("cacophony.json" "snow.json" "snow_multi_psk.json")
 
 # Parse command line arguments to determine which modules to run
-default_modules=("utils_bit32" "utils_bit64" "utils_bytes" "poly1305" "chacha20" "chacha20_poly1305" "aes_gcm" "x25519" "x448" "sha256" "sha512" "blake2" "noise")
-all_modules=("utils_bit32" "utils_bit64" "utils_bytes" "poly1305" "chacha20" "chacha20_poly1305" "aes_gcm" "x25519" "x448" "sha256" "sha512" "blake2" "noise" "noise_vectors")
+default_modules=("utils_bytes" "noise")
+all_modules=("utils_bytes" "noise" "noise_vectors")
 modules_to_run=("$@")
 
 # Validate modules if specified
@@ -132,16 +132,10 @@ run_selftest() {
   "
 }
 
+# Crypto primitives are provided by lua-crypto (vendor/crypto.lua) and tested in
+# that library's own CI. The noise / noise_vectors suites exercise the vendored
+# crypto end-to-end through the protocol.
 run_selftest "Utils - Byte operations" "utils_bytes" "noiseprotocol.utils.bytes"
-run_selftest "Poly1305 MAC" "poly1305" "noiseprotocol.crypto.poly1305"
-run_selftest "ChaCha20 Stream Cipher" "chacha20" "noiseprotocol.crypto.chacha20"
-run_selftest "ChaCha20-Poly1305 AEAD" "chacha20_poly1305" "noiseprotocol.crypto.chacha20_poly1305"
-run_selftest "AESGCM AEAD" "aes_gcm" "noiseprotocol.crypto.aes_gcm"
-run_selftest "X25519 Curve25519 ECDH" "x25519" "noiseprotocol.crypto.x25519"
-run_selftest "X448 Curve448 ECDH" "x448" "noiseprotocol.crypto.x448"
-run_selftest "SHA-256 Cryptographic Hash" "sha256" "noiseprotocol.crypto.sha256"
-run_selftest "SHA-512 Cryptographic Hash" "sha512" "noiseprotocol.crypto.sha512"
-run_selftest "BLAKE2 Cryptographic Hash" "blake2" "noiseprotocol.crypto.blake2"
 run_selftest "Noise Protocol" "noise" "noiseprotocol"
 
 # Function to run noise vectors in parallel
