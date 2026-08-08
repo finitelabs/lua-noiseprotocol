@@ -161,12 +161,26 @@ Supports all standard patterns from the Noise specification:
 `@alias`, returns that disagree with `@return`, fields missing from a `@class`.
 
 `--configpath` displaces each individual setting the committed config declares,
-not each table, so a suppression knob is only closed if it is named. `diagnostics`
-therefore declares four: `enable`, `disable`, `severity` and `globals`. Each was
-measured as a live bypass with a planted probe, `enable: false` silencing the check
-entirely and the rest suppressing individual codes, and each is a no-op on a clean
-tree. Anything under `diagnostics` not in that list is still reachable from a local
-`.luarc.json`, so add it here rather than assume the list is complete.
+not each table, so a knob is only closed if it is named. The candidate set is not a
+matter of taste: `cli/check_worker.lua` derives `--check` suppression from
+`diagnostics.disable` and `diagnostics.severity`, and every other vector is read by
+a checker or the provider, so it can be enumerated with
+
+    grep -rhoE "config\.get\([^,]*, *'Lua\.[A-Za-z.]+'" \
+      script/core/diagnostics/*.lua script/provider/diagnostic.lua
+
+Of the 17 keys that turns up on 3.19.0, six were measured as live bypasses and are
+declared here: `enable`, `disable`, `severity`, `globals`, `globalsRegex` and
+`enableScheme` under `diagnostics`, plus `special` under `runtime`.
+
+`enableScheme` is the dangerous one and the reason "declare it empty" is not a rule
+to apply blindly. It gates whether a document is diagnosed at all rather than
+suppressing a code, its default is `["file"]`, and declaring `[]` silences the
+entire check exactly as a local `["git"]` would. It is declared as `["file"]`.
+
+Any setting this file does not name, under any table, is still reachable from a
+local `.luarc.json`. Re-run the enumeration above when upgrading the server rather
+than assuming this list stayed complete.
 
 The server version is not pinned locally, though. `install-deps` takes whatever
 Homebrew has while CI pins 3.19.0, so compare the version the target prints if a

@@ -1,6 +1,7 @@
 {
   "runtime": {
-    "version": "LuaJIT"
+    "version": "LuaJIT",
+    "special": {}
   },
   "workspace": {
     "useGitIgnore": false,
@@ -25,6 +26,10 @@
     "enable": true,
     "disable": [],
     "severity": {},
-    "globals": []
+    "globals": [],
+    "globalsRegex": [],
+    "enableScheme": [
+      "file"
+    ]
   }
 }
