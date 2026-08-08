@@ -43,4 +43,4 @@ luac.out
 build/
 
 # Personal language-server config; typecheck pins its own via --configpath
-.luarc.json
+.luarc.json*
