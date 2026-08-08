@@ -1924,12 +1924,17 @@ function noiseprotocol.selftest()
       local original_msg = alice:send_message("Original message")
       assert(#original_msg > 16, "Transport message should include auth tag")
 
-      -- Test various tampering scenarios
-      local tampered_msg1 = string.char(255) .. original_msg:sub(2) -- Flip first byte
+      -- Derived from the byte it displaces: a fixed 0xFF matched the ciphertext's
+      -- own byte 1 time in 256, leaving the "tampered" copy identical.
+      local first_byte = original_msg:byte(1)
+      local last_byte = original_msg:byte(#original_msg)
+      assert(first_byte and last_byte, "Transport message should have bytes to tamper with")
+
+      local tampered_msg1 = string.char((first_byte + 1) % 256) .. original_msg:sub(2)
       local tamper_result1 = bob:receive_message(tampered_msg1)
       assert(tamper_result1 == nil, "First byte tampered message should be rejected")
 
-      local tampered_msg2 = original_msg:sub(1, -2) .. string.char(255) -- Flip last byte
+      local tampered_msg2 = original_msg:sub(1, -2) .. string.char((last_byte + 1) % 256)
       local tamper_result2 = bob:receive_message(tampered_msg2)
       assert(tamper_result2 == nil, "Last byte tampered message should be rejected")
 
