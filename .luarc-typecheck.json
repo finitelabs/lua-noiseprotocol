@@ -1,0 +1,30 @@
+{
+  "runtime": {
+    "version": "LuaJIT"
+  },
+  "workspace": {
+    "useGitIgnore": false,
+    "library": [
+      "vendor"
+    ],
+    "ignoreDir": [
+      ".claude",
+      ".git",
+      ".idea",
+      ".install",
+      ".lua",
+      ".luarocks",
+      ".venv",
+      "build",
+      "dist",
+      "node_modules",
+      "vendor"
+    ]
+  },
+  "diagnostics": {
+    "enable": true,
+    "disable": [],
+    "severity": {},
+    "globals": []
+  }
+}

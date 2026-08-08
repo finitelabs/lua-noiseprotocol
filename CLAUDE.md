@@ -153,3 +153,33 @@ Supports all standard patterns from the Noise specification:
 - Use `make format` before committing changes
 - Follow existing naming conventions and module patterns
 - Add tests for new functionality following existing patterns
+
+### typecheck
+
+`make typecheck` runs lua-language-server against the committed
+`.luarc-typecheck.json`. It catches what luacheck does not: undefined or duplicate
+`@alias`, returns that disagree with `@return`, fields missing from a `@class`.
+
+`--configpath` displaces each individual setting the committed config declares,
+not each table, so a suppression knob is only closed if it is named. `diagnostics`
+therefore declares four: `enable`, `disable`, `severity` and `globals`. Each was
+measured as a live bypass with a planted probe, `enable: false` silencing the check
+entirely and the rest suppressing individual codes, and each is a no-op on a clean
+tree. Anything under `diagnostics` not in that list is still reachable from a local
+`.luarc.json`, so add it here rather than assume the list is complete.
+
+The server version is not pinned locally, though. `install-deps` takes whatever
+Homebrew has while CI pins 3.19.0, so compare the version the target prints if a
+local result disagrees with CI.
+
+`vendor/` is both a `library` and an `ignoreDir`, which is load-bearing: with only
+`ignoreDir` the vendored definitions are lost and their uses become
+`undefined-doc-name`, and with only `library` the vendored code is diagnosed here.
+
+`runtime.version` is pinned to LuaJIT because that is what Control4 runs. Unset,
+the server assumes Lua 5.4 and checks the wrong language. That makes no difference
+to the findings in this repo today, so it is pinned as the correct setting rather
+than to change a count.
+
+Part of `check`, so CI enforces it. CI pins the server version so the count cannot
+move under an upstream release; 3.18.2 and 3.19.0 agree here.

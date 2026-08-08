@@ -546,9 +546,11 @@ function CipherState:encrypt_with_ad(ad, plaintext)
   if not self:has_key() then
     return plaintext -- Return plaintext if no key
   end
-  --- @cast self.k -nil
+  -- Held in a local because `@cast` applies to locals, not table fields.
+  local k = self.k
+  --- @cast k -nil
 
-  local ciphertext = self.cipher.encrypt(self.k, self.n, plaintext, ad)
+  local ciphertext = self.cipher.encrypt(k, self.n, plaintext, ad)
   self.n = self.n + 1
 
   return ciphertext
@@ -562,9 +564,10 @@ function CipherState:decrypt_with_ad(ad, ciphertext)
   if not self:has_key() then
     return ciphertext -- Return ciphertext if no key
   end
-  --- @cast self.k -nil
+  local k = self.k
+  --- @cast k -nil
 
-  local plaintext = self.cipher.decrypt(self.k, self.n, ciphertext, ad)
+  local plaintext = self.cipher.decrypt(k, self.n, ciphertext, ad)
 
   -- Only increment nonce if decryption was successful
   if plaintext then
@@ -577,8 +580,9 @@ end
 --- Rekey the cipher state (for forward secrecy)
 function CipherState:rekey()
   if self:has_key() then
-    --- @cast self.k -nil
-    self.k = self.cipher.rekey(self.k)
+    local k = self.k
+    --- @cast k -nil
+    self.k = self.cipher.rekey(k)
   end
 end
 
