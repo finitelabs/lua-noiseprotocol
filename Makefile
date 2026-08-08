@@ -137,8 +137,25 @@ lint:
 		exit 1; \
 	fi
 
+# Type-check annotations with the Lua language server. Catches what luacheck does
+# not: undefined or duplicate `@alias`, returns that disagree with `@return`.
+#
+# `vendor/` is both a `library` and an `ignoreDir`: with only the first its code is
+# diagnosed here, with only the second its definitions are lost. `runtime.version`
+# is pinned to LuaJIT because that is what Control4 runs, not to change a count.
+.PHONY: typecheck
+typecheck:
+	@if command -v lua-language-server >/dev/null 2>&1; then \
+		echo "Running lua-language-server $$(lua-language-server --version)..."; \
+		lua-language-server --check "$(CURDIR)" --checklevel=Warning \
+			--configpath="$(CURDIR)/.luarc-typecheck.json" --logpath="$(CURDIR)/build/luals"; \
+	else \
+		echo "lua-language-server not found. Install with: make install-deps"; \
+		exit 1; \
+	fi
+
 .PHONY: check
-check: format-check lint
+check: format-check lint typecheck
 	@echo "Code quality checks complete."
 
 # Clean generated files
@@ -165,6 +182,7 @@ help:
 	@echo "  make format             - Format code with stylua"
 	@echo "  make format-check       - Check code formatting"
 	@echo "  make lint               - Lint code with luacheck"
+	@echo "  make typecheck          - Check annotations with lua-language-server"
 	@echo ""
 	@echo "Setup:"
 	@echo "  make install-deps       - Install development dependencies"

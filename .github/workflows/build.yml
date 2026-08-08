@@ -37,6 +37,14 @@ jobs:
           version: v2.1.0
           args: false # Will be run as part of `make check`
 
+      - name: Install lua-language-server
+        run: |
+          curl -sL "https://github.com/LuaLS/lua-language-server/releases/download/$LUALS/lua-language-server-$LUALS-linux-x64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+        env:
+          LUALS: 3.19.0
+
       - name: Check
         run: make check
 
