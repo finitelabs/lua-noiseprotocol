@@ -161,26 +161,48 @@ Supports all standard patterns from the Noise specification:
 `@alias`, returns that disagree with `@return`, fields missing from a `@class`.
 
 `--configpath` displaces each individual setting the committed config declares,
-not each table, so a knob is only closed if it is named. The candidate set is not a
-matter of taste: `cli/check_worker.lua` derives `--check` suppression from
-`diagnostics.disable` and `diagnostics.severity`, and every other vector is read by
-a checker or the provider, so it can be enumerated with
+not each table, so a knob is only closed if it is named. Suppression keys can be
+enumerated from the diagnostics read sites:
 
     grep -rhoE "config\.get\([^,]*, *'Lua\.[A-Za-z.]+'" \
       script/core/diagnostics/*.lua script/provider/diagnostic.lua
 
-Of the 17 keys that turns up on 3.19.0, six were measured as live bypasses and are
-declared here: `enable`, `disable`, `severity`, `globals`, `globalsRegex` and
-`enableScheme` under `diagnostics`, plus `special` under `runtime`.
+Treat that as a floor, not a ceiling: its file scope is the shape of its blind
+spot. Anything that gates file loading or rewrites source before analysis is read
+elsewhere, and has to be enumerated separately from `script/plugin.lua` and
+`script/workspace.lua`. `runtime.plugin` is the case that matters, and the grep
+cannot surface it by construction. `check_worker.lua` does `require 'plugin'`, so
+an `OnSetText` returning an empty edit blanks every file in the repo and the check
+passes having analysed nothing.
 
-`enableScheme` is the dangerous one and the reason "declare it empty" is not a rule
-to apply blindly. It gates whether a document is diagnosed at all rather than
-suppressing a code, its default is `["file"]`, and declaring `[]` silences the
-entire check exactly as a local `["git"]` would. It is declared as `["file"]`.
+Two traps decide how a key gets declared, and neither is answered by the key's
+type:
+
+Empty is not always inert, so read the read site. `neededFileStatus` and
+`groupFileStatus` are per-key lookups that fall back to the built-in default, so
+`{}` leaves behaviour untouched. `enableScheme` defaults to `["file"]`, which makes
+`[]` silence the whole check exactly as a local `["git"]` would. It is declared as
+`["file"]` for that reason.
+
+Immunity is per-code, so one planted probe does not measure a key.
+`check_worker.lua`'s `downgrade_checks_to_opened` force-overwrites only codes whose
+default status is `Any`, leaving everything defaulting to `Opened` under local
+control, which is precisely the type-check group this gate exists for. An
+`undefined-global` probe therefore reports `neededFileStatus` as inert while a
+`return-type-mismatch` probe shows it silencing the check. Probe with a type-check
+code.
+
+Declared here as measured live bypasses: `enable`, `disable`, `severity`,
+`globals`, `globalsRegex`, `enableScheme`, `neededFileStatus` and `groupFileStatus`
+under `diagnostics`, plus `special` and `plugin` under `runtime`. `pluginArgs`,
+`groupSeverity`, `maxPreload` and `preloadFileSize` are declared as belt and
+braces rather than measured bypasses: `groupSeverity` relabels a finding that is
+still counted and still exits non-zero, and `preloadFileSize: 0` fails loud rather
+than hiding anything. Declaring them costs nothing and saves re-deriving that.
 
 Any setting this file does not name, under any table, is still reachable from a
-local `.luarc.json`. Re-run the enumeration above when upgrading the server rather
-than assuming this list stayed complete.
+local `.luarc.json`. Re-run both enumerations when upgrading the server rather than
+assuming this list stayed complete.
 
 The server version is not pinned locally, though. `install-deps` takes whatever
 Homebrew has while CI pins 3.19.0, so compare the version the target prints if a
