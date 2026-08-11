@@ -53,7 +53,7 @@ for lua_version in "${LUA_VERSIONS[@]}"; do
 
     "$luarocks_binary" install openssl 1>/dev/null
 
-    if ! NOISE_USE_OPENSSL=1 LUA_BINARY="$lua_binary" "$script_dir/run_tests.sh" "$@"; then
+    if ! LUA_BINARY="$lua_binary" "$script_dir/run_tests.sh" --require-openssl "$@"; then
         failed_versions+=("$lua_version (OpenSSL)")
     else
         passed_versions+=("$lua_version (OpenSSL)")

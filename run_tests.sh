@@ -2,16 +2,27 @@
 
 # Noise Protocol Library Test Runner
 #
-# Usage: ./run_tests.sh [module_names...]
+# Usage: ./run_tests.sh [--require-openssl] [module_names...]
 #
 # Examples:
-#   ./run_tests.sh                    # Run all modules
-#   ./run_tests.sh bitops poly1305    # Run only bitops and poly1305
-#   ./run_tests.sh noise              # Run only noise protocol tests
+#   ./run_tests.sh                        # Run all modules
+#   ./run_tests.sh bitops poly1305        # Run only bitops and poly1305
+#   ./run_tests.sh noise                  # Run only noise protocol tests
+#   ./run_tests.sh --require-openssl all  # Run all modules on the OpenSSL-accelerated path
+#
+# --require-openssl enables acceleration and aborts unless it engages, so a run
+# that silently fell back to pure Lua fails instead of passing.
 #
 # Available modules: utils, utils_bit32, utils_bit64, utils_bytes, poly1305, chacha20, chacha20_poly1305, aes_gcm, x25519, x448, sha256, sha512, blake2, noise, noise_vectors
 
 set -e  # Exit on any error
+
+require_openssl=false
+if [ "${1:-}" = "--require-openssl" ]; then
+    require_openssl=true
+    export CRYPTO_USE_OPENSSL=1
+    shift
+fi
 
 echo "============================================="
 echo "🔐 Noise Protocol Library - Test Suite Runner"
@@ -45,6 +56,38 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # Add repository root to Lua's package path
 # This allows require() to find modules in the src/tests directories
 lua_path="$script_dir/?.lua;$script_dir/?/init.lua;$script_dir/src/?.lua;$script_dir/src/?/init.lua;$script_dir/tests/?.lua;$script_dir/vendor/?.lua;$LUA_PATH"
+
+if [ "$require_openssl" = true ]; then
+    echo "---------------------------------------------"
+    echo -e "${blue}Preflight: OpenSSL acceleration${nc}"
+    echo "---------------------------------------------"
+
+    # The wrapper is registered into package.preload by the crypto amalgamation,
+    # so crypto has to be required before it resolves. AAD is the feature the
+    # AEAD ciphers gate on; the hashes need only the flag and the binding, and
+    # unavailable_reason checks both of those before it looks at the feature.
+    if ! LUA_PATH="$lua_path" "$lua_binary" -e "
+        require('crypto')
+        local wrapper = require('crypto.openssl_wrapper')
+        local reason = wrapper.unavailable_reason(wrapper.Feature.AAD)
+        if reason then
+            io.stderr:write('OpenSSL acceleration did not engage: ' .. reason .. '\n')
+            os.exit(1)
+        end
+        local features = wrapper.features()
+        local names = {}
+        for name in pairs(features) do names[#names + 1] = name end
+        table.sort(names)
+        for _, name in ipairs(names) do
+            print(string.format('  %-6s %s', name, features[name] and 'accelerated' or 'pure Lua'))
+        end
+    "; then
+        echo -e "${red}❌ OpenSSL acceleration was required but is not active${nc}"
+        exit 1
+    fi
+    echo -e "${green}✅ OpenSSL acceleration active${nc}"
+    echo
+fi
 
 # Define noise vector files
 vectors_dir="${NOISE_VECTORS_DIR:=vectors_sampled}"

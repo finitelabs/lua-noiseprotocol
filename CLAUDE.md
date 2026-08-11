@@ -186,13 +186,21 @@ asserted on both encrypt and decrypt, so a long-lived transport session raises
 - Noise vectors test with the sampled set by default for speed; use
   `NOISE_VECTORS_DIR=vectors_full` for comprehensive validation
 
-### `NOISE_USE_OPENSSL` does nothing
+### Testing the OpenSSL-accelerated path
 
-`run_tests_matrix.sh` and build.yml's "Run tests using OpenSSL" step both set
-`NOISE_USE_OPENSSL=1`, but nothing reads that variable. The vendored crypto reads
-**`CRYPTO_USE_OPENSSL`**. That CI step currently re-runs the same pure-Lua path as
-the step before it, so the accelerated configuration is unverified in CI. Use
-`CRYPTO_USE_OPENSSL=1` when testing acceleration locally.
+The vendored crypto reads **`CRYPTO_USE_OPENSSL`**. Prefer
+`./run_tests.sh --require-openssl all` (`make test-openssl`) over setting the
+variable by hand: it sets the variable itself and aborts unless acceleration
+actually engaged, so a run that fell back to pure Lua fails instead of passing.
+`run_tests_matrix.sh` and build.yml's "Run tests using OpenSSL" step both go
+through that flag.
+
+The fallback is deliberately silent, which is right for a driver at runtime and
+wrong for a test run: `openssl_wrapper.use(true)` succeeds on a host with no
+binding at all, and the accelerated primitives quietly resolve to their pure-Lua
+implementations. `openssl_wrapper.unavailable_reason(feature)` is what
+distinguishes "the toggle is off" from "the binding is missing" from "this build
+lacks that feature", and is what the preflight asserts on.
 
 ### Code Style
 - 2-space indentation, 120 column width, double quotes preferred
