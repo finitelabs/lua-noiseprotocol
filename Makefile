@@ -28,6 +28,11 @@ test-matrix-%:
 test-%:
 	./run_tests.sh $*
 
+# Run the full suite on the OpenSSL-accelerated path
+.PHONY: test-openssl
+test-openssl:
+	./run_tests.sh --require-openssl all
+
 
 build/amalg.cache: src/noiseprotocol/init.lua
 	@echo "Generating amalgamation cache..."
@@ -171,6 +176,7 @@ help:
 	@echo "Testing:"
 	@echo "  make test               - Run all tests"
 	@echo "  make test-<name>        - Run specific test (e.g., make test-x25519)"
+	@echo "  make test-openssl       - Run all tests, requiring OpenSSL acceleration"
 	@echo "  make test-matrix        - Run tests across all Lua versions"
 	@echo "  make test-matrix-<name> - Run specific test across all Lua versions"
 	@echo ""

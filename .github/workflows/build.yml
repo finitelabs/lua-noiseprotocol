@@ -71,7 +71,7 @@ jobs:
         with:
           luarocksVersion: "3.12.2"
 
-      - name: Install lua-opensssl
+      - name: Install lua-openssl
         run: luarocks install openssl
 
       - name: Setup tests
@@ -107,7 +107,7 @@ jobs:
 
       - name: Run tests using OpenSSL
         run: |
-          NOISE_USE_OPENSSL=1 make test-all
+          make test-openssl
 
   build:
     needs: test
