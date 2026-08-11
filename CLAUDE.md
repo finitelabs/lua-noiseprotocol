@@ -11,8 +11,18 @@ This is a pure Lua implementation of the Noise Protocol Framework with zero exte
 - Zero dependencies for maximum portability (the full single-file bundle vendors everything)
 - Complete Noise Protocol Framework implementation
 - Cryptographic primitives provided by [lua-crypto](https://github.com/finitelabs/lua-crypto) (vendored as `vendor/crypto.lua`)
-- Optional OpenSSL acceleration via `crypto.use_openssl(true)` (from lua-crypto)
-- Extensive test coverage with RFC test vectors
+- Optional OpenSSL acceleration via `noiseprotocol.use_openssl(true)`
+- Extensive test coverage with the Cacophony/Snow test vectors
+
+Noise is a Trevor Perrin specification, not an RFC; there are no RFC vectors for
+it and the repo does not pin a spec revision.
+
+### Cipher suites
+
+DH `25519`, `448`; ciphers `ChaChaPoly`, `AESGCM`; hashes `SHA256`, `SHA512`,
+`BLAKE2s`, `BLAKE2b`. Protocol names are
+`Noise_<pattern>_<dh>_<cipher>_<hash>`, e.g. `Noise_XX_25519_ChaChaPoly_SHA256`,
+with `+`-joined modifiers.
 
 ## Development Commands
 
@@ -51,9 +61,16 @@ make format-check
 # Lint code
 make lint
 
-# Run all quality checks
+# Check LuaCATS annotations with lua-language-server
+make typecheck
+
+# Full gate: format-check + lint + typecheck
 make check
 ```
+
+`make check` is the gate CI runs. `make all` is `format lint test build`, which
+rewrites `src/` in place and runs neither `format-check` nor `typecheck` — it is
+not a substitute for `check`.
 
 ### Building
 ```bash
@@ -74,11 +91,17 @@ make clean
 src/noiseprotocol/
 ├── init.lua                    # Main module with the complete Noise implementation
 └── utils/                      # Utility modules
+    ├── init.lua               # Utils aggregator
     ├── bytes.lua              # Byte manipulation utilities (uses bitn)
-    └── benchmark.lua          # Performance measurement helper
+    └── benchmark.lua          # Timing helper (no caller in src/ or tests/)
 vendor/
 ├── bitn.lua                    # Portable bitwise operations (lua-bitn)
 └── crypto.lua                  # Cryptographic primitives (lua-crypto, canonical core build: bitn excluded)
+tests/                          # test_noise_vectors.lua + vendored json.lua
+.luarc-typecheck.json           # Hardened config for `make typecheck` (see below)
+.luacheckrc
+run_tests.sh, run_tests_matrix.sh
+.github/workflows/{build,release}.yml
 ```
 
 The cryptographic primitives (hashes, AEAD ciphers, MACs, X25519/X448) live in
@@ -96,10 +119,19 @@ release artifact.
 
 ### Key Classes and APIs
 
-**NoiseConnection** (`src/noiseprotocol/init.lua`)
-- Main API for establishing secure connections
-- Handles handshake patterns (XX, IK, NK, etc.) and PSK variants
-- Manages transport phase encryption/decryption
+**NoiseConnection** (`src/noiseprotocol/init.lua`) — the main API:
+`NoiseConnection:new(config)`, `:start_handshake(prologue)`,
+`:write_handshake_message(payload) -> message`,
+`:read_handshake_message(message) -> payload`, `:send_message`,
+`:receive_message`, `:get_handshake_hash`.
+
+Note these are **not** `write_message`/`read_message` — those names belong to
+`HandshakeState`, one layer down.
+
+The error contract is mixed: misuse raises through `assert`, but
+`:receive_message` returns **nil** on authentication failure rather than raising.
+A caller that only wraps in `pcall` will read a failed decryption as success with
+a nil payload.
 
 **Cryptographic Primitives** (vendored from lua-crypto as `vendor/crypto.lua`)
 - Exposed to Noise code via `require("crypto")` and re-exported as `noiseprotocol.crypto`
@@ -111,12 +143,18 @@ release artifact.
 - Used internally by NoiseConnection
 
 ### Noise Protocol Patterns
-Supports all standard patterns from the Noise specification:
-- One-way: N, K, X
-- Interactive: NN, NK, NX, KN, KK, KX, XN, XK, XX
-- Immediate patterns: IN, IK, IX
-- PSK variants: NNpsk0, XXpsk2, etc.
-- Deferred patterns: K1K, X1X, etc.
+
+All 38 spec patterns are implemented — 3 one-way (N, K, X), 12 fundamental, and
+23 deferred — and `psk0` through `psk3` are supported, with a 32-byte PSK
+enforced.
+
+**The `fallback` modifier is not.** It parses and then raises
+`"Fallback modifier not yet supported"`. "Supports all standard patterns" is true
+of patterns and not of modifiers.
+
+**Nonces cap at 2^32-1, not the spec's 2^64-1.** `MAX_NONCE = 2^32 - 1` is
+asserted on both encrypt and decrypt, so a long-lived transport session raises
+`"Nonce overflow"` far earlier than the specification allows. Rekey before then.
 
 ### Test Vector Management
 - `tests/vectors_sampled/` - Default sampled vectors (~5% of full set)
@@ -130,29 +168,40 @@ Supports all standard patterns from the Noise specification:
 - Pure Lua implementation lacks constant-time guarantees
 - Not suitable for production without additional hardening
 - Intended for portability and educational use
-- Always use OpenSSL acceleration when available in production
+- Enable OpenSSL acceleration where it is available, via
+  `noiseprotocol.use_openssl(true)`
 
 ### Performance
-- LuaJIT significantly outperforms standard Lua interpreters
-- X448 is notably slower than X25519 in pure Lua
-- The vendored crypto uses pre-allocated arrays for performance; not thread-safe for concurrent coroutines
+- The vendored crypto uses pre-allocated arrays; not thread-safe for concurrent
+  coroutines
 
 ### Compatibility
 - Supports Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT
-- Uses conditional implementations for version-specific features
-- `bit32` operations use fallbacks for older Lua versions
 
 ### Testing Best Practices
-- Always run full test suite before commits
-- Use `make test` for standard testing workflow
+- **`make test` is not the full suite.** Its default module list is
+  `utils_bytes noise`, which excludes `noise_vectors` entirely. The full run is
+  `./run_tests.sh all` / `make test-all`, which is what CI runs.
 - Run `make test-matrix` for multi-version compatibility
-- Noise vectors test with sampled set by default for speed
-- Use full vectors (`NOISE_VECTORS_DIR=vectors_full`) for comprehensive validation
+- Noise vectors test with the sampled set by default for speed; use
+  `NOISE_VECTORS_DIR=vectors_full` for comprehensive validation
+
+### `NOISE_USE_OPENSSL` does nothing
+
+`run_tests_matrix.sh` and build.yml's "Run tests using OpenSSL" step both set
+`NOISE_USE_OPENSSL=1`, but nothing reads that variable. The vendored crypto reads
+**`CRYPTO_USE_OPENSSL`**. That CI step currently re-runs the same pure-Lua path as
+the step before it, so the accelerated configuration is unverified in CI. Use
+`CRYPTO_USE_OPENSSL=1` when testing acceleration locally.
 
 ### Code Style
+- 2-space indentation, 120 column width, double quotes preferred
 - Use `make format` before committing changes
-- Follow existing naming conventions and module patterns
-- Add tests for new functionality following existing patterns
+
+There is no `.stylua.toml`; these live only as CLI flags in the Makefile, so bare
+`stylua src/` outside `make` reformats differently. `.luacheckrc` sets
+`std = "min"`, `compat = true`, `globals = {unpack}` and `max_line_length = false`,
+so the column limit is enforced by stylua alone.
 
 ### typecheck
 
