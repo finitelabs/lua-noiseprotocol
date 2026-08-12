@@ -184,7 +184,7 @@ help:
 	@echo "  make build              - Build single-file distributions"
 	@echo ""
 	@echo "Code Quality:"
-	@echo "  make check              - Run format-check and lint"
+	@echo "  make check              - Run format-check, lint, and typecheck"
 	@echo "  make format             - Format code with stylua"
 	@echo "  make format-check       - Check code formatting"
 	@echo "  make lint               - Lint code with luacheck"
