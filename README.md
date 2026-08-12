@@ -149,10 +149,11 @@ LUA_BINARY=lua5.1 ./run_tests.sh
 ### Code Quality
 
 ```bash
-make check               # Run format check and lint
+make check               # Run format check, lint, and typecheck
 make format              # Format code with stylua
 make format-check        # Check formatting without modifying
 make lint                # Run luacheck
+make typecheck           # Check annotations with lua-language-server
 ```
 
 ### Building
