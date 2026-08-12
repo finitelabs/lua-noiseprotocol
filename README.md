@@ -130,7 +130,7 @@ All one-way and interactive patterns from the Noise specification are supported:
 ### Setup
 
 ```bash
-# Install development dependencies (stylua, luacheck, amalg)
+# Install development dependencies (stylua, luacheck, lua-language-server, amalg)
 make install-deps
 ```
 
