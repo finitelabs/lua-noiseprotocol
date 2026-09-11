@@ -94,8 +94,8 @@ vectors_dir="${NOISE_VECTORS_DIR:=vectors_sampled}"
 vector_files=("cacophony.json" "snow.json" "snow_multi_psk.json")
 
 # Parse command line arguments to determine which modules to run
-default_modules=("utils_bytes" "noise")
-all_modules=("utils_bytes" "noise" "noise_vectors")
+default_modules=("utils_bytes" "noise" "lpack")
+all_modules=("utils_bytes" "noise" "noise_vectors" "lpack")
 modules_to_run=("$@")
 
 # Validate modules if specified
@@ -180,6 +180,15 @@ run_selftest() {
 # crypto end-to-end through the protocol.
 run_selftest "Utils - Byte operations" "utils_bytes" "noiseprotocol.utils.bytes"
 run_selftest "Noise Protocol" "noise" "noiseprotocol"
+
+# Control4's LuaJIT has string.pack/unpack as lpack, a different dialect: the
+# selftests again with that shape installed before bitn loads.
+run_test "All selftests with lpack-shaped string.pack" "lpack" "
+    dofile('$script_dir/test/lpack_stub.lua')
+    if not (require('noiseprotocol.utils.bytes').selftest() and require('noiseprotocol').selftest()) then
+        os.exit(1)
+    end
+  "
 
 # Function to run noise vectors in parallel
 run_noise_vectors_parallel() {
