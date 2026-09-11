@@ -185,6 +185,9 @@ asserted on both encrypt and decrypt, so a long-lived transport session raises
 - Run `make test-matrix` for multi-version compatibility
 - Noise vectors test with the sampled set by default for speed; use
   `NOISE_VECTORS_DIR=vectors_full` for comprehensive validation
+- `run_tests.sh` exports `LUA_INIT` raising LuaJIT's `maxmcode` to 8 MB: the vector
+  suite outgrows the default 512 KB, and past it the JIT flushes and re-records every
+  trace forever (FL-21). Running the vectors outside the runner on LuaJIT needs the same.
 
 ### Testing the OpenSSL-accelerated path
 
