@@ -187,7 +187,10 @@ asserted on both encrypt and decrypt, so a long-lived transport session raises
   `NOISE_VECTORS_DIR=vectors_full` for comprehensive validation
 - `run_tests.sh` exports `LUA_INIT` raising LuaJIT's `maxmcode` to 8 MB: the vector
   suite outgrows the default 512 KB, and past it the JIT flushes and re-records every
-  trace forever (FL-21). Running the vectors outside the runner on LuaJIT needs the same.
+  trace (FL-21). On macOS arm64 LuaJIT can also fail to *allocate* machine code within
+  jump range of the interpreter, which is address-layout dependent and loops the same
+  way; if a LuaJIT run of the vectors sits at 100% CPU with no output, rerun it, or run
+  it with `LUA_INIT="jit.off()"`. Linux (CI) does not hit the allocation failure.
 
 ### Testing the OpenSSL-accelerated path
 

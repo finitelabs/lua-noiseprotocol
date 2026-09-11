@@ -43,8 +43,11 @@ failed_modules=()
 lua_binary="${LUA_BINARY:-lua}"
 
 # The vector suite compiles more machine code than LuaJIT's default 512 KB budget
-# holds; past it the JIT flushes every trace and re-records forever (FL-21).
-export LUA_INIT="if jit then jit.opt.start('maxmcode=8192') end"
+# holds; past it the JIT flushes every trace and re-records (FL-21). A caller's own
+# LUA_INIT (e.g. jit.off()) wins.
+if [ -z "${LUA_INIT:-}" ]; then
+    export LUA_INIT="if jit then jit.opt.start('maxmcode=8192') end"
+fi
 
 # Check if the lua binary is available
 if ! command -v "$lua_binary" &> /dev/null; then
