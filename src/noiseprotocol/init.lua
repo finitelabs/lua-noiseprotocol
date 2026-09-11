@@ -24,6 +24,11 @@ local noiseprotocol = {}
 local crypto = require("crypto")
 local utils = require("noiseprotocol.utils")
 local openssl_wrapper = require("crypto.openssl_wrapper")
+local bit64 = require("bitn").bit64
+
+local bit64_from_number = bit64.from_number
+local bit64_u64_to_le_bytes = bit64.u64_to_le_bytes
+local bit64_u64_to_be_bytes = bit64.u64_to_be_bytes
 
 --- Module version
 local VERSION = "dev"
@@ -218,14 +223,7 @@ local DH_448 = {
 local function make_chachapoly_nonce(n)
   -- ChaCha20Poly1305 uses little-endian format: 4 zero bytes + 64-bit counter
   assert(n <= MAX_NONCE, "Nonce overflow")
-  local nonce = string.rep("\0", 4) -- 4 zero bytes padding
-  -- Little-endian 64-bit counter (8 bytes)
-  for _ = 1, 8 do
-    nonce = nonce .. string.char(n % 256)
-    n = math.floor(n / 256)
-  end
-
-  return nonce
+  return string.rep("\0", 4) .. bit64_u64_to_le_bytes(bit64_from_number(n))
 end
 
 --- ChaCha20-Poly1305 AEAD implementation
@@ -251,20 +249,7 @@ local CIPHER_ChaChaPoly = {
 local function make_aesgcm_nonce(n)
   -- AESGCM uses big-endian format: 4 zero bytes + 64-bit counter
   assert(n <= MAX_NONCE, "Nonce overflow")
-  local nonce = string.rep("\0", 4) -- 4 zero bytes padding
-
-  -- Big-endian 64-bit counter
-  local bytes = {}
-  for i = 1, 8 do
-    bytes[i] = string.char(n % 256)
-    n = math.floor(n / 256)
-  end
-  -- Reverse the bytes for big-endian
-  for i = 8, 1, -1 do
-    nonce = nonce .. bytes[i]
-  end
-
-  return nonce
+  return string.rep("\0", 4) .. bit64_u64_to_be_bytes(bit64_from_number(n))
 end
 
 --- AES-GCM AEAD implementation
