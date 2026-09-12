@@ -185,12 +185,10 @@ asserted on both encrypt and decrypt, so a long-lived transport session raises
 - Run `make test-matrix` for multi-version compatibility
 - Noise vectors test with the sampled set by default for speed; use
   `NOISE_VECTORS_DIR=vectors_full` for comprehensive validation
-- `run_tests.sh` exports `LUA_INIT` raising LuaJIT's `maxmcode` to 8 MB: the vector
-  suite outgrows the default 512 KB, and past it the JIT flushes and re-records every
-  trace (FL-21). On macOS arm64 LuaJIT can also fail to *allocate* machine code within
-  jump range of the interpreter, which is address-layout dependent and loops the same
-  way; if a LuaJIT run of the vectors sits at 100% CPU with no output, rerun it, or run
-  it with `LUA_INIT="jit.off()"`. Linux (CI) does not hit the allocation failure.
+- On LuaJIT, use a build from 2025-11-05 or later (upstream `68354f44`, "Allow mcode
+  allocations outside of the jump range"). Older builds on macOS arm64 can spin
+  forever on `failed to allocate mcode memory` during the vector run, depending on
+  address layout, so the same command passes or hangs at random (FL-21).
 
 ### Testing the OpenSSL-accelerated path
 
