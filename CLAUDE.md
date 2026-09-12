@@ -185,6 +185,10 @@ asserted on both encrypt and decrypt, so a long-lived transport session raises
 - Run `make test-matrix` for multi-version compatibility
 - Noise vectors test with the sampled set by default for speed; use
   `NOISE_VECTORS_DIR=vectors_full` for comprehensive validation
+- On LuaJIT, use a build from 2025-11-05 or later (upstream `68354f44`, "Allow mcode
+  allocations outside of the jump range"). Older builds on macOS arm64 can spin
+  forever on `failed to allocate mcode memory` during the vector run, depending on
+  address layout, so the same command passes or hangs at random (FL-21).
 
 ### Testing the OpenSSL-accelerated path
 
