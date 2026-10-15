@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     name: Check
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +50,7 @@ jobs:
 
   test:
     needs: check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     continue-on-error: false
     strategy:
       fail-fast: true
@@ -111,7 +111,7 @@ jobs:
 
   build:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     name: Build Combined Module
     steps:
       - uses: actions/checkout@v4
