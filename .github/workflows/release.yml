@@ -13,19 +13,19 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Setup Lua
-        uses: leafo/gh-actions-lua@v11
+        uses: leafo/gh-actions-lua@v13
         with:
           luaVersion: '5.4'
 
       - name: Setup LuaRocks
-        uses: leafo/gh-actions-luarocks@v5
+        uses: leafo/gh-actions-luarocks@v6
         with:
-          luarocksVersion: "3.12.2"
+          luarocksVersion: "3.13.0"
 
       - name: Install amalg
         run: luarocks install amalg
@@ -36,7 +36,7 @@ jobs:
           make build
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}

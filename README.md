@@ -3,7 +3,7 @@
 A pure Lua implementation of the
 [Noise Protocol Framework](https://noiseprotocol.org) with **zero external
 dependencies**. This library provides a complete, portable implementation that
-runs on Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT.
+runs on Lua 5.1, 5.2, 5.3, 5.4, 5.5, and LuaJIT.
 
 ## Features
 

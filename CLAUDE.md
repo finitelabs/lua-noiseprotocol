@@ -176,7 +176,7 @@ asserted on both encrypt and decrypt, so a long-lived transport session raises
   coroutines
 
 ### Compatibility
-- Supports Lua 5.1, 5.2, 5.3, 5.4, and LuaJIT
+- Supports Lua 5.1, 5.2, 5.3, 5.4, 5.5, and LuaJIT
 
 ### Testing Best Practices
 - **`make test` is not the full suite.** Its default module list is
@@ -197,7 +197,9 @@ The vendored crypto reads **`CRYPTO_USE_OPENSSL`**. Prefer
 variable by hand: it sets the variable itself and aborts unless acceleration
 actually engaged, so a run that fell back to pure Lua fails instead of passing.
 `run_tests_matrix.sh` and build.yml's "Run tests using OpenSSL" step both go
-through that flag.
+through that flag. CI skips that step, and the lua-openssl install, on the Lua 5.5
+leg: the published `openssl-0.11.1-1` rockspec declares `lua <= 5.4`, so 5.5 is
+covered on the pure-Lua path only.
 
 The fallback is deliberately silent, which is right for a driver at runtime and
 wrong for a test run: `openssl_wrapper.use(true)` succeeds on a host with no
@@ -266,7 +268,7 @@ local `.luarc.json`. Re-run both enumerations when upgrading the server rather t
 assuming this list stayed complete.
 
 The server version is not pinned locally, though. `install-deps` takes whatever
-Homebrew has while CI pins 3.19.0, so compare the version the target prints if a
+Homebrew has while CI pins 3.19.2, so compare the version the target prints if a
 local result disagrees with CI.
 
 `vendor/` is both a `library` and an `ignoreDir`, which is load-bearing: with only
@@ -279,4 +281,4 @@ to the findings in this repo today, so it is pinned as the correct setting rathe
 than to change a count.
 
 Part of `check`, so CI enforces it. CI pins the server version so the count cannot
-move under an upstream release; 3.18.2 and 3.19.0 agree here.
+move under an upstream release; 3.18.2, 3.19.0 and 3.19.2 agree here.
