@@ -31,7 +31,7 @@ NOISE_VECTORS_DIR=vectors_full ./run_tests.sh noise_vectors
 
 ### Regenerating Sampled Vectors
 ```bash
-python tests/sample_vectors.py
+python test/sample_vectors.py
 ```
 
 ## Sampling Strategy

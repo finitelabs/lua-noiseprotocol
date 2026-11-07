@@ -13,6 +13,9 @@
 # --require-openssl enables acceleration and aborts unless it engages, so a run
 # that silently fell back to pure Lua fails instead of passing.
 #
+# TEST_BUNDLE=build/noiseprotocol.lua runs the same tests against that built file,
+# with src/ off the path so nothing can load from it.
+#
 # Available modules: utils, utils_bit32, utils_bit64, utils_bytes, poly1305, chacha20, chacha20_poly1305, aes_gcm, x25519, x448, sha256, sha512, blake2, noise, noise_vectors
 
 set -e  # Exit on any error
@@ -54,8 +57,15 @@ echo
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # Add repository root to Lua's package path
-# This allows require() to find modules in the src/tests directories
-lua_path="$script_dir/?.lua;$script_dir/?/init.lua;$script_dir/src/?.lua;$script_dir/src/?/init.lua;$script_dir/tests/?.lua;$script_dir/vendor/?.lua;$LUA_PATH"
+# This allows require() to find modules in the src/test directories
+lua_path="$script_dir/?.lua;$script_dir/?/init.lua;$script_dir/src/?.lua;$script_dir/src/?/init.lua;$script_dir/test/?.lua;$script_dir/vendor/?.lua;$LUA_PATH"
+load_lib=""
+if [ -n "$TEST_BUNDLE" ]; then
+    [ -f "$TEST_BUNDLE" ] || { echo -e "${red}Error: $TEST_BUNDLE not found; run make build${nc}"; exit 1; }
+    echo "Testing the built bundle: $TEST_BUNDLE"
+    lua_path="$script_dir/test/?.lua;$script_dir/vendor/?.lua"
+    load_lib="package.preload['noiseprotocol'] = assert(loadfile('$TEST_BUNDLE')); require('noiseprotocol');"
+fi
 
 if [ "$require_openssl" = true ]; then
     echo "---------------------------------------------"
@@ -166,9 +176,10 @@ run_test() {
 run_selftest() {
   local module_name="$1"
   local module_key="$2"
-  local lua_module="$3"
+  local test_file="$3"
   run_test "$module_name" "$module_key" "
-    local result = require('$lua_module').selftest()
+    $load_lib
+    local result = dofile('$script_dir/test/$test_file')()
     if not result then
         os.exit(1)
     end
@@ -178,14 +189,15 @@ run_selftest() {
 # Crypto primitives are provided by lua-crypto (vendor/crypto.lua) and tested in
 # that library's own CI. The noise / noise_vectors suites exercise the vendored
 # crypto end-to-end through the protocol.
-run_selftest "Utils - Byte operations" "utils_bytes" "noiseprotocol.utils.bytes"
-run_selftest "Noise Protocol" "noise" "noiseprotocol"
+run_selftest "Utils - Byte operations" "utils_bytes" "test_utils_bytes.lua"
+run_selftest "Noise Protocol" "noise" "test_noiseprotocol.lua"
 
 # Control4's LuaJIT has string.pack/unpack as lpack, a different dialect: the
-# selftests again with that shape installed before bitn loads.
-run_test "All selftests with lpack-shaped string.pack" "lpack" "
+# tests again with that shape installed before bitn loads.
+run_test "All tests with lpack-shaped string.pack" "lpack" "
     dofile('$script_dir/test/lpack_stub.lua')
-    if not (require('noiseprotocol.utils.bytes').selftest() and require('noiseprotocol').selftest()) then
+    $load_lib
+    if not dofile('$script_dir/test/with_tests.lua').selftest() then
         os.exit(1)
     end
   "
@@ -207,8 +219,9 @@ run_noise_vectors_parallel() {
     echo "Analyzing vector files..."
     for vector_file in "${vector_files[@]}"; do
         local info=$(LUA_PATH="$lua_path" "$lua_binary" -e "
-            local tv = require('tests.test_noise_vectors')
-            local info = tv.get_vector_info('$repo_root/tests/$vectors_dir/$vector_file')
+            $load_lib
+            local tv = require('test_noise_vectors')
+            local info = tv.get_vector_info('$repo_root/test/$vectors_dir/$vector_file')
             print(string.format('%d total', info.total))
         " 2>&1) || { echo "Error getting info: $info"; exit 1; }
         echo "  $vector_file: $info"
@@ -226,8 +239,8 @@ run_noise_vectors_parallel() {
         local pids=()
         for ((i=0; i<num_workers; i++)); do
             (
-                LUA_PATH="$lua_path" "$lua_binary" "$repo_root/tests/test_noise_vectors.lua" \
-                    "$repo_root/tests/$vectors_dir/$vector_file" "$i" "$num_workers" \
+                LUA_PATH="$lua_path" "$lua_binary" -e "$load_lib" "$repo_root/test/test_noise_vectors.lua" \
+                    "$repo_root/test/$vectors_dir/$vector_file" "$i" "$num_workers" \
                     > "$temp_dir/worker_$vector_file_$i.out" 2>&1
                 echo $? > "$temp_dir/worker_$vector_file_$i.status"
             ) &
@@ -308,8 +321,9 @@ run_noise_vectors_sequential() {
     for vector_file in "${vector_files[@]}"; do
         echo "Processing $vector_file..."
         if ! LUA_PATH="$lua_path" "$lua_binary" -e "
-            local tv = require('tests.test_noise_vectors')
-            local success = tv.run_all_tests('$script_dir/tests/$vectors_dir/$vector_file')
+            $load_lib
+            local tv = require('test_noise_vectors')
+            local success = tv.run_all_tests('$script_dir/test/$vectors_dir/$vector_file')
             if not success then os.exit(1) end
         " 2>&1; then
             all_passed=false
