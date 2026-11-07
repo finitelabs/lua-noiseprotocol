@@ -27,6 +27,9 @@ Download a pre-built single-file module from the
   path. Use this when composing with libraries that already provide them.
 - **`noiseprotocol-portable.lua`** - **portable** build with every dependency
   bundled in (zero external dependencies). Use this for a single drop-in file.
+- **`noiseprotocol-tests.lua`** - the portable build plus the tests, for running
+  them where the library runs; `dofile("noiseprotocol-tests.lua")` returns the
+  library with `selftest()` added. The other two files carry no test code.
 
 The cryptographic primitives are provided by
 [lua-crypto](https://github.com/finitelabs/lua-crypto) (vendored as
@@ -159,7 +162,7 @@ make typecheck           # Check annotations with lua-language-server
 ### Building
 
 ```bash
-make build               # Build single-file distributions (build/noiseprotocol.lua [core], build/noiseprotocol-portable.lua)
+make build               # Build noiseprotocol.lua (core), noiseprotocol-portable.lua and noiseprotocol-tests.lua
 make clean               # Remove generated files
 ```
 

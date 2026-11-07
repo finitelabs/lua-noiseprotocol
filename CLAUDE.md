@@ -44,6 +44,9 @@ make test-noise
 ./run_tests_matrix.sh
 make test-matrix
 
+# Run the tests against the built files
+make build test-bundle
+
 # Run Noise Protocol test vectors
 ./run_tests.sh noise_vectors
 NOISE_VECTORS_DIR=vectors_full ./run_tests.sh noise_vectors  # Full test set
@@ -74,7 +77,7 @@ not a substitute for `check`.
 
 ### Building
 ```bash
-# Build single-file distributions (noiseprotocol.lua [core] + noiseprotocol-portable.lua)
+# Build noiseprotocol.lua [core], noiseprotocol-portable.lua and noiseprotocol-tests.lua
 make build
 
 # Install development dependencies
@@ -92,12 +95,16 @@ src/noiseprotocol/
 ├── init.lua                    # Main module with the complete Noise implementation
 └── utils/                      # Utility modules
     ├── init.lua               # Utils aggregator
-    ├── bytes.lua              # Byte manipulation utilities (uses bitn)
-    └── benchmark.lua          # Timing helper (no caller in src/ or tests/)
+    └── bytes.lua              # Byte manipulation utilities (uses bitn)
 vendor/
 ├── bitn.lua                    # Portable bitwise operations (lua-bitn)
 └── crypto.lua                  # Cryptographic primitives (lua-crypto, canonical core build: bitn excluded)
-tests/                          # test_noise_vectors.lua + vendored json.lua
+test/                           # Tests; nothing under src/ is test code
+├── test_noiseprotocol.lua      # Protocol vectors and functional tests; returns the test function
+├── test_utils_bytes.lua        # Byte utility tests; returns the test function
+├── test_noise_vectors.lua      # Cacophony/Snow vector suite, with vectors_{sampled,full}/
+├── with_tests.lua              # Main chunk of the with-tests build; selftest()
+└── vendor/json.lua, lpack_stub.lua
 .luarc-typecheck.json           # Hardened config for `make typecheck` (see below)
 .luacheckrc
 run_tests.sh, run_tests_matrix.sh
@@ -116,6 +123,10 @@ release artifact.
   libraries that share those dependencies without duplicating them.
 - `noiseprotocol-portable.lua` — **portable**: bundles the Noise implementation
   plus `crypto` and `bitn` for zero-dependency drop-in use.
+- `noiseprotocol-tests.lua` — the portable build plus `test_utils_bytes` and
+  `test_noiseprotocol`, from `test/with_tests.lua`. `dofile` returns the
+  library with `selftest()` added, for running the tests on a controller.
+  `make build` fails if `noiseprotocol.lua` mentions `selftest` or `benchmark`.
 
 ### Key Classes and APIs
 
@@ -157,8 +168,8 @@ asserted on both encrypt and decrypt, so a long-lived transport session raises
 `"Nonce overflow"` far earlier than the specification allows. Rekey before then.
 
 ### Test Vector Management
-- `tests/vectors_sampled/` - Default sampled vectors (~5% of full set)
-- `tests/vectors_full/` - Complete test vectors from Cacophony/Snow
+- `test/vectors_sampled/` - Default sampled vectors (~5% of full set)
+- `test/vectors_full/` - Complete test vectors from Cacophony/Snow
 - Use `NOISE_VECTORS_DIR=vectors_full` for comprehensive testing
 - Parallel test execution with `NOISE_VECTOR_WORKERS=N`
 
@@ -182,6 +193,11 @@ asserted on both encrypt and decrypt, so a long-lived transport session raises
 - **`make test` is not the full suite.** Its default module list is
   `utils_bytes noise`, which excludes `noise_vectors` entirely. The full run is
   `./run_tests.sh all` / `make test-all`, which is what CI runs.
+- `TEST_BUNDLE=build/noiseprotocol.lua ./run_tests.sh all` (or `make build
+  test-bundle`) runs the same suite against the built file with `src/` off the
+  path, so a module missing from the bundle fails instead of loading from
+  source. CI runs it on every interpreter against the build job's files, and
+  the release runs it on the files it publishes.
 - Run `make test-matrix` for multi-version compatibility
 - Noise vectors test with the sampled set by default for speed; use
   `NOISE_VECTORS_DIR=vectors_full` for comprehensive validation

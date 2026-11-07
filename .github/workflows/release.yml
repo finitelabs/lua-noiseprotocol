@@ -35,6 +35,9 @@ jobs:
           # The make build command will automatically inject the version from the git tag
           make build
 
+      - name: Test the built files
+        run: make test-bundle
+
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
@@ -46,3 +49,4 @@ jobs:
           files: |
             build/noiseprotocol.lua
             build/noiseprotocol-portable.lua
+            build/noiseprotocol-tests.lua
