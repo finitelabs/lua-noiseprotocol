@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # List of luaenv versions to test
-LUA_VERSIONS=("5.1.5" "5.2.4" "5.3.6" "5.4.8" "luajit-2.1-dev")
+# The versions CI tests (gh-actions-lua's 5.1-5.5 aliases and LuaJIT's v2.1 branch). CI also runs
+# LuaJIT 2.0, which has no arm64 port, so it stays CI-only.
+LUA_VERSIONS=("5.1.5" "5.2.4" "5.3.6" "5.4.9" "5.5.1" "luajit-2.1-dev")
 
 # Colors for output
 green='\033[0;32m'
@@ -45,6 +47,11 @@ for lua_version in "${LUA_VERSIONS[@]}"; do
     else
         passed_versions+=("$lua_version")
     fi
+
+    # lua-openssl's published rockspec stops at Lua 5.4, so 5.5 runs pure Lua only, as in CI.
+    case "$lua_version" in
+        5.5*) continue ;;
+    esac
 
     echo -e "${yellow}~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${nc}"
     echo -e "${yellow}Running tests with $lua_version (OpenSSL)${nc}"

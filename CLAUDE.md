@@ -215,7 +215,8 @@ actually engaged, so a run that fell back to pure Lua fails instead of passing.
 `run_tests_matrix.sh` and build.yml's "Run tests using OpenSSL" step both go
 through that flag. CI skips that step, and the lua-openssl install, on the Lua 5.5
 leg: the published `openssl-0.11.1-1` rockspec declares `lua <= 5.4`, so 5.5 is
-covered on the pure-Lua path only.
+covered on the pure-Lua path only. `run_tests_matrix.sh` skips its OpenSSL pass on
+5.5 for the same reason.
 
 The fallback is deliberately silent, which is right for a driver at runtime and
 wrong for a test run: `openssl_wrapper.use(true)` succeeds on a host with no
